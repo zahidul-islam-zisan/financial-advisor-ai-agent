@@ -1,6 +1,6 @@
 class AiConfig {
   /// Gemini model name
-  static const String modelName = "gemini-2.5-flash";
+  static const String modelName = "gemini-2.0-flash";
 
   /// System instructions for the financial AI assistant
   static const String systemInstruction = """

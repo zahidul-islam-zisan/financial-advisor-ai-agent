@@ -126,6 +126,23 @@ function setGeminiFetcher(fetcher) {
 }
 
 /**
+ * Resolves and sanitizes model name, mapping deprecated/placeholder identifiers to active models
+ */
+function resolveModelName(envModel) {
+  if (!envModel) return "gemini-2.0-flash";
+  const trimmed = envModel.trim();
+  const clean = trimmed.startsWith("models/") ? trimmed.slice(7) : trimmed;
+  // Automatically sanitize deprecated or nonexistent model placeholders
+  if (clean === "gemini-2.5-flash" || clean === "gemini-1.5-flash") {
+    return "gemini-2.0-flash";
+  }
+  if (clean === "gemini-2.5-flash-lite" || clean === "gemini-1.5-flash-8b") {
+    return "gemini-2.0-flash-lite";
+  }
+  return clean || "gemini-2.0-flash";
+}
+
+/**
  * Maps HTTP status codes to non-sensitive offlineReason identifiers
  */
 function mapStatusToOfflineReason(status) {
@@ -142,7 +159,8 @@ function mapStatusToOfflineReason(status) {
  * Invokes Gemini REST API via POST with key in x-goog-api-key header (never in URL)
  */
 async function callGeminiApi({ model, apiKey, systemInstruction, contents, tools }) {
-  const url = `${GEMINI_API_URL}/${model}:generateContent`;
+  const cleanModel = model.startsWith("models/") ? model.slice(7) : model;
+  const url = `${GEMINI_API_URL}/${cleanModel}:generateContent`;
   const fetcher = _customFetcher || globalThis.fetch;
   const response = await fetcher(url, {
     method: "POST",
@@ -253,8 +271,8 @@ async function runAgent({ client, uid, docId, message, history = [] }) {
     });
   }
 
-  let primaryModel = process.env.GEMINI_MODEL || "gemini-2.5-flash";
-  const fallbackModel = "gemini-2.5-flash-lite";
+  let primaryModel = resolveModelName(process.env.GEMINI_MODEL);
+  const fallbackModel = "gemini-2.0-flash-lite";
 
   // 1. Build sanitized contents array with PII masking
   const contents = [];
@@ -310,6 +328,13 @@ async function runAgent({ client, uid, docId, message, history = [] }) {
         message,
         offlineReason,
       });
+    }
+
+    // Handle 404 Model Not Found: Retry once with gemini-2.0-flash if currentModel was something else
+    if (response.status === 404 && currentModel !== "gemini-2.0-flash") {
+      console.warn(`[Gemini Model 404] Model ${currentModel} returned 404. Retrying with gemini-2.0-flash...`);
+      currentModel = "gemini-2.0-flash";
+      continue;
     }
 
     // Handle 429 Rate Limit or 503 Overloaded: Retry once with lite model if not already using it
@@ -498,6 +523,7 @@ async function runAgent({ client, uid, docId, message, history = [] }) {
 module.exports = {
   SYSTEM_INSTRUCTION,
   TOOL_DECLARATIONS,
+  resolveModelName,
   mapStatusToOfflineReason,
   runAgent,
   generateDeterministicFallback,

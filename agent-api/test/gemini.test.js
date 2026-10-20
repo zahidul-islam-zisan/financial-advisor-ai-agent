@@ -2,6 +2,7 @@ const { describe, it, beforeEach, afterEach } = require("node:test");
 const assert = require("node:assert");
 const {
   runAgent,
+  resolveModelName,
   mapStatusToOfflineReason,
   TOOL_DECLARATIONS,
   setGeminiFetcher,
@@ -186,5 +187,61 @@ describe("Gemini Agent API, Diagnostics & Tool Schema Tests", () => {
 
     assert.strictEqual(result.isOffline, true);
     assert.strictEqual(result.offlineReason, "timeout");
+  });
+
+  it("7. resolveModelName accurately maps nonexistent/deprecated models to active gemini-2.0-flash", () => {
+    assert.strictEqual(resolveModelName("gemini-2.5-flash"), "gemini-2.0-flash");
+    assert.strictEqual(resolveModelName("gemini-1.5-flash"), "gemini-2.0-flash");
+    assert.strictEqual(resolveModelName("gemini-2.5-flash-lite"), "gemini-2.0-flash-lite");
+    assert.strictEqual(resolveModelName("models/gemini-2.0-flash"), "gemini-2.0-flash");
+    assert.strictEqual(resolveModelName(""), "gemini-2.0-flash");
+    assert.strictEqual(resolveModelName(undefined), "gemini-2.0-flash");
+    assert.strictEqual(resolveModelName("custom-gemini-pro"), "custom-gemini-pro");
+  });
+
+  it("8. When model returns 404, agent automatically retries with gemini-2.0-flash and succeeds", async () => {
+    process.env.GEMINI_API_KEY = "valid-key";
+    process.env.GEMINI_MODEL = "nonexistent-model";
+
+    let attempt = 0;
+    const requestedUrls = [];
+
+    setGeminiFetcher(async (url) => {
+      attempt++;
+      requestedUrls.push(url);
+      if (attempt === 1) {
+        return {
+          ok: false,
+          status: 404,
+          text: async () => JSON.stringify({ error: { code: 404, status: "NOT_FOUND", message: "Model not found" } }),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          candidates: [
+            {
+              content: {
+                parts: [{ text: "Analysis generated after fallback to gemini-2.0-flash." }],
+              },
+            },
+          ],
+        }),
+      };
+    });
+
+    const result = await runAgent({
+      client: dummyClient,
+      uid: "user_123",
+      docId: "user@example.com_user_123",
+      message: "Check my spending",
+    });
+
+    assert.strictEqual(result.isOffline, false);
+    assert.ok(result.reply.includes("Analysis generated"));
+    assert.strictEqual(attempt, 2);
+    assert.ok(requestedUrls[0].includes("nonexistent-model"));
+    assert.ok(requestedUrls[1].includes("gemini-2.0-flash"));
   });
 });
