@@ -464,12 +464,12 @@ async function runAgent({ client, uid, docId, message, history = [] }) {
     }
 
     const parts = candidate.content.parts || [];
-    let functionCall = null;
+    const functionCalls = [];
     let textReply = "";
 
     for (const part of parts) {
       if (part.functionCall) {
-        functionCall = part.functionCall;
+        functionCalls.push(part.functionCall);
       }
       if (part.text) {
         textReply += part.text;
@@ -477,7 +477,7 @@ async function runAgent({ client, uid, docId, message, history = [] }) {
     }
 
     // If Gemini did not call any tool, return the assistant text response
-    if (!functionCall) {
+    if (functionCalls.length === 0) {
       let finalReply = textReply.trim();
       if (!finalReply.includes("not professional financial advice")) {
         finalReply += "\n\nThis is a suggestion, not professional financial advice.";
@@ -491,58 +491,79 @@ async function runAgent({ client, uid, docId, message, history = [] }) {
       };
     }
 
-    // Handle Function Call
-    const toolName = functionCall.name;
-    const toolArgs = functionCall.args || {};
-    const toolTier = getToolTier(toolName) || 1;
+    // Execute each functionCall returned in this model turn
+    const functionResponseParts = [];
 
-    let toolResult;
-    try {
-      if (toolTier === 2) {
-        toolResult = await executeTier2Tool(client, uid, docId, toolName, toolArgs);
-        pendingAction = {
-          id: toolResult.actionId,
+    for (const functionCall of functionCalls) {
+      const toolName = functionCall.name;
+      const toolArgs = functionCall.args || {};
+      const toolTier = getToolTier(toolName) || 1;
+
+      let toolResult;
+      try {
+        if (toolTier === 2) {
+          toolResult = await executeTier2Tool(client, uid, docId, toolName, toolArgs);
+          pendingAction = {
+            id: toolResult.actionId,
+            uid,
+            docId,
+            actionType: toolResult.actionType,
+            title: toolResult.title,
+            parameters: toolResult.parameters,
+            status: "PENDING",
+            createdAt: new Date().toISOString(),
+            expiresAt: toolResult.expiresAt,
+          };
+        } else {
+          toolResult = await executeTier1Tool(client, docId, toolName, toolArgs);
+        }
+
+        // Record audit log for the tool call
+        await logAudit(client, {
           uid,
           docId,
-          actionType: toolResult.actionType,
-          title: toolResult.title,
-          parameters: toolResult.parameters,
-          status: "PENDING",
-          createdAt: new Date().toISOString(),
-          expiresAt: toolResult.expiresAt,
-        };
-      } else {
-        toolResult = await executeTier1Tool(client, docId, toolName, toolArgs);
+          actionId: toolResult.actionId || null,
+          actionType: toolName.toUpperCase(),
+          status: "SUCCESS",
+          summary: `Agent executed tool ${toolName} (Tier ${toolTier})`,
+          details: { toolArgs },
+        });
+
+        executedToolCalls.push({
+          name: toolName,
+          args: toolArgs,
+          tier: toolTier,
+        });
+      } catch (toolErr) {
+        toolResult = { error: toolErr.message };
+        executedToolCalls.push({
+          name: toolName,
+          args: toolArgs,
+          tier: toolTier,
+          error: toolErr.message,
+        });
       }
 
-      // Record audit log for the tool call
-      await logAudit(client, {
-        uid,
-        docId,
-        actionId: toolResult.actionId || null,
-        actionType: toolName.toUpperCase(),
-        status: "SUCCESS",
-        summary: `Agent executed tool ${toolName} (Tier ${toolTier})`,
-        details: { toolArgs },
-      });
+      // Build functionResponse part with id matching (required by Gemini 3.5+)
+      const responsePart = {
+        functionResponse: {
+          name: toolName,
+          response: {
+            name: toolName,
+            content: toolResult,
+          },
+        },
+      };
 
-      executedToolCalls.push({
-        name: toolName,
-        args: toolArgs,
-        tier: toolTier,
-      });
-    } catch (toolErr) {
-      toolResult = { error: toolErr.message };
-      executedToolCalls.push({
-        name: toolName,
-        args: toolArgs,
-        tier: toolTier,
-        error: toolErr.message,
-      });
+      if (functionCall.id) {
+        responsePart.functionResponse.id = functionCall.id;
+      }
+
+      functionResponseParts.push(responsePart);
     }
 
-    // If a Tier 2 tool was called, we create a pending action and can conclude
-    if (toolTier === 2 && pendingAction) {
+    // If a Tier 2 tool was called, we create a pending action and can conclude immediately
+    if (pendingAction) {
       const proposalText = `I have prepared a proposal for your authorization:\n\n**${pendingAction.title}**\n\nPlease review and confirm or cancel using the card below.\n\nThis is a suggestion, not professional financial advice.`;
       return {
         reply: proposalText,
@@ -553,33 +574,18 @@ async function runAgent({ client, uid, docId, message, history = [] }) {
       };
     }
 
-    // Append model functionCall and function response parts to conversation contents
-    // Gemini 3.x requires: functionResponse in a turn with role "function", 
-    // and the id field from the functionCall must be echoed back.
-    contents.push({
-      role: "model",
-      parts: [{ functionCall }],
-    });
-
-    // Build functionResponse with id matching (required for Gemini 3.x+)
-    const functionResponsePart = {
-      functionResponse: {
-        name: toolName,
-        response: {
-          name: toolName,
-          content: toolResult,
-        },
-      },
+    // CRITICAL for Gemini 3.5+:
+    // 1. Preserve the model turn EXACTLY as returned (including thoughtSignature on functionCall parts)
+    const modelTurn = {
+      role: candidate.content.role || "model",
+      parts: candidate.content.parts || [],
     };
+    contents.push(modelTurn);
 
-    // If the model's functionCall included an id, echo it in the response
-    if (functionCall.id) {
-      functionResponsePart.functionResponse.id = functionCall.id;
-    }
-
+    // 2. Append user turn containing functionResponse for every functionCall executed
     contents.push({
       role: "user",
-      parts: [functionResponsePart],
+      parts: functionResponseParts,
     });
   }
 

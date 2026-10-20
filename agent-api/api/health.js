@@ -167,16 +167,16 @@ module.exports = async function handler(req, res) {
         return;
       }
 
-      // Check if Gemini returned a functionCall
+      // Check if Gemini returned any functionCall
       const candidate = step1Json.candidates?.[0];
       const parts = candidate?.content?.parts || [];
-      const functionCall = parts.find(p => p.functionCall)?.functionCall;
+      const functionCalls = parts.filter(p => p.functionCall).map(p => p.functionCall);
 
-      if (!functionCall) {
+      if (functionCalls.length === 0) {
         // Gemini returned text directly, no tool loop needed
         const textReply = parts.find(p => p.text)?.text || "";
         res.status(200).json({
-          ok: true, version: "1.0.7", testModel: cleanModel,
+          ok: true, version: "1.0.8", testModel: cleanModel,
           result: "Gemini returned text without tool call",
           replyPreview: textReply.slice(0, 200),
           diagnosticLog,
@@ -186,54 +186,56 @@ module.exports = async function handler(req, res) {
 
       diagnosticLog.push({
         step: 2,
-        action: "Gemini requested tool call",
-        toolName: functionCall.name,
-        toolArgs: functionCall.args,
+        action: "Gemini requested tool call(s)",
+        toolCount: functionCalls.length,
+        tools: functionCalls.map(f => ({ name: f.name, id: f.id })),
       });
 
-      // Step 2: Simulate tool execution and send functionResponse back
-      const mockToolResult = {
-        month: "2026-10",
-        currency: "৳",
-        totalIncome: 50000,
-        totalExpense: 28500,
-        netSavings: 21500,
-        savingsRate: 43.0,
-        categoryBreakdown: { "Dining & Food": 5200, "Transportation": 3800, "Shopping": 2500 },
-        transactionCount: 22,
-      };
+      // Step 2: Push the EXACT model candidate content (preserves functionCall, thoughtSignature, IDs)
+      contents.push(candidate.content);
 
-      // Build the multi-turn contents EXACTLY like runAgent does
-      contents.push({
-        role: "model",
-        parts: [{ functionCall }],
-      });
+      // Build function responses for ALL function calls requested by the model in this turn
+      const functionResponseParts = [];
+      for (const fc of functionCalls) {
+        const mockToolResult = fc.name === "get_budget_status" 
+          ? { month: "2026-10", budgets: [{ category: "Dining & Food", limit: 300, spent: 50 }], alerts: [] }
+          : {
+              month: "2026-10",
+              currency: "৳",
+              totalIncome: 50000,
+              totalExpense: 28500,
+              netSavings: 21500,
+              savingsRate: 43.0,
+              categoryBreakdown: { "Dining & Food": 5200, "Transportation": 3800 },
+              transactionCount: 22,
+            };
 
-      // Build functionResponse with id matching (required for Gemini 3.x+)
-      const functionResponsePart = {
-        functionResponse: {
-          name: functionCall.name,
-          response: {
-            name: functionCall.name,
-            content: mockToolResult,
+        const part = {
+          functionResponse: {
+            name: fc.name,
+            response: {
+              name: fc.name,
+              content: mockToolResult,
+            },
           },
-        },
-      };
-      // If the model's functionCall included an id, echo it back
-      if (functionCall.id) {
-        functionResponsePart.functionResponse.id = functionCall.id;
+        };
+        if (fc.id) {
+          part.functionResponse.id = fc.id;
+        }
+        functionResponseParts.push(part);
       }
-      
+
       contents.push({
         role: "user",
-        parts: [functionResponsePart],
+        parts: functionResponseParts,
       });
 
       diagnosticLog.push({
         step: 3,
-        action: "Sending functionResponse back to Gemini",
+        action: "Sending functionResponse(s) back to Gemini",
         contentsLength: contents.length,
         contentsRoles: contents.map(c => c.role),
+        responsePartsCount: functionResponseParts.length,
       });
 
       const step2Res = await fetch(
