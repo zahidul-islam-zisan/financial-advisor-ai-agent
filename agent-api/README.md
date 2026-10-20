@@ -1,6 +1,7 @@
 # ⚡ Pulse Expense — AI Financial Assistant Agent API
 
 > **Platform:** Vercel Serverless Functions (Node.js 20, CommonJS)  
+> **Auth & Database:** Direct Firebase ID Token Verification (`jose` + Google JWKS) & Firestore REST API (Acts as signed-in user; zero service account keys required)  
 > **Cost Profile:** 100% Free Tier compatible (Vercel Hobby + Firebase Spark Free Plan)  
 > **LLM Engine:** Google Gemini 2.5 Flash (`gemini-2.5-flash` with automatic fallback to `gemini-2.5-flash-lite` and deterministic offline rule engine)  
 
@@ -8,7 +9,11 @@
 
 ## 🌟 Overview & Capabilities
 
-This service provides a server-side AI Financial Advisor for the **Pulse Expense** Flutter application. It runs serverless on Vercel, bypassing the need for Firebase Cloud Functions (which require the paid Blaze plan).
+This service provides a serverless AI Financial Advisor backend for the **Pulse Expense** Flutter application.
+
+It operates without requiring a Firebase Service Account or the `firebase-admin` SDK. Instead, it:
+1. Verifies the user's Firebase ID Token locally via Google's public JSON Web Key Set (JWKS) using `jose`.
+2. Interacts with Cloud Firestore via the official **Firestore REST API** using the user's own Bearer ID token. All Firestore Security Rules are automatically enforced against the authenticated user.
 
 ### Deterministic Tool Tiers:
 - **Tier 1 (Read-Only, Automated Execution):**
@@ -30,21 +35,34 @@ This service provides a server-side AI Financial Advisor for the **Pulse Expense
 
 ## 🛡️ Security & Privacy Engineering
 
-1. **Authentication & Identity Derivation:**  
-   Every request requires `Authorization: Bearer <Firebase ID token>`. The user's document ID is constructed strictly from the verified token:
+1. **Authentication & Identity Derivation (`lib/auth.js`):**  
+   Every request requires `Authorization: Bearer <Firebase ID token>`. Verified against Google's public certificates with checks for:
+   - Algorithm `RS256`
+   - Issuer `https://securetoken.google.com/<FIREBASE_PROJECT_ID>`
+   - Audience `<FIREBASE_PROJECT_ID>`
+   - Expiration and valid timestamp
+   - Non-empty subject (`sub` / `uid`) and required `email` claim.
+   The user's root document ID is constructed strictly from the verified claims:
    $$\text{docId} = \text{decodedToken.email} + \text{"\_"} + \text{decodedToken.uid}$$
-   The server rejects any attempt by a client to specify or override the target `docId`.
-2. **Prompt Injection Containment:**  
-   All user-originated strings from Firestore (notes, category names) are sanitized (ASCII control characters removed, capped at 200 chars) and wrapped in `<data>...</data>` tags. System instructions command Gemini never to follow instructions inside `<data>` tags.
+   The server rejects any attempt by a client body to specify or override the target `docId`.
+
+2. **Prompt Injection Containment (`lib/guard.js`):**  
+   All user-originated strings from Firestore (notes, category names) are sanitized (ASCII control characters stripped, capped at 200 chars) and enclosed in `<data>...</data>` tags. System instructions command Gemini never to follow instructions inside `<data>` tags.
+
 3. **PII Masking (`lib/mask.js`):**  
    Before text is sent to Google Gemini, emails, credit card / bank account numbers (13-19 digits), and phone numbers (8+ digits) are masked (`[EMAIL_REDACTED]`, `[ACCOUNT_REDACTED]`, `[PHONE_REDACTED]`).
-4. **Rate Limiting (`lib/ratelimit.js`):**  
-   Per-UID rate limiting enforced in Firestore `rate_limits/{uid}`: max 20 requests/minute and 200 requests/day. Returns HTTP 429 when exceeded.
-5. **Two-Step Human Confirmation:**  
-   Proposals expire in 15 minutes. Replay attacks are blocked by checking `status === "PENDING"`. Confirmations and cancellations run in Firestore atomic transactions that write server-verified audit records (`verifiedByServer: true`).
-6. **Client Firestore Rules Hardening:**  
+
+4. **Atomic Anti-Replay Confirmation (`api/confirm.js` & `api/cancel.js`):**  
+   Pending actions are bound to a 15-minute expiration window. When a user confirms or cancels an action, the endpoint submits an atomic commit to Firestore REST with a precondition check:
+   ```json
+   "currentDocument": { "updateTime": "<capturedUpdateTime>" }
+   ```
+   If a duplicate or concurrent request attempts to process the action, Firestore rejects the commit with a precondition failure, preventing replay attacks.
+
+5. **Known Risks & Security Trade-offs:**
    > [!IMPORTANT]
-   > `firestore.rules` enforces `allow write: if false` on `pending_actions`, `audit_logs`, and `rate_limits` for client SDKs. Client writes to these collections must be routed through this API.
+   > - **Append-Only Audit Logs:** Since this architecture runs on the Spark free plan without server-privileged Admin SDK credentials, Firestore security rules enforce append-only logging (`create` allowed with matching `uid`, `update` and `delete` disallowed). However, a malicious client possessing a valid ID token could write its own record directly to `audit_logs`. Full cryptographic tamper-proofing requires Cloud Functions / Admin SDK on a paid plan.
+   > - **In-Memory Rate Limiting:** Enforces 20 req/min and 200 req/day per UID in an in-memory Map (`lib/ratelimit.js`) on a best-effort basis per serverless container instance, rather than a shared database collection.
 
 ---
 
@@ -53,29 +71,8 @@ This service provides a server-side AI Financial Advisor for the **Pulse Expense
 | Variable | Description |
 | :--- | :--- |
 | `GEMINI_API_KEY` | Google Gemini API key from [Google AI Studio](https://aistudio.google.com/app/apikey). |
-| `FIREBASE_SERVICE_ACCOUNT_BASE64` | Base64-encoded string of your Firebase Admin Service Account JSON. |
+| `FIREBASE_PROJECT_ID` | Your Firebase Project ID (e.g. `pulse-expense-3156f`). |
 | `GEMINI_MODEL` | *(Optional)* Model ID (default: `gemini-2.5-flash`). |
-
----
-
-## 🔑 Generating the Firebase Service Account Key
-
-1. Go to the [Firebase Console](https://console.firebase.google.com/).
-2. Click **Project Settings** (gear icon) ➔ **Service accounts** tab.
-3. Under **Firebase Admin SDK**, select **Node.js** and click **Generate new private key**.
-4. Save the downloaded JSON file locally (e.g. `service-account.json`). **NEVER commit this file to Git.**
-5. Convert the JSON file into a Base64 string:
-
-#### On Windows (PowerShell):
-```powershell
-[Convert]::ToBase64String([System.IO.File]::ReadAllBytes("service-account.json")) | Set-Clipboard
-# The base64 string is now copied to your clipboard!
-```
-
-#### On macOS / Linux (Terminal):
-```bash
-base64 -w 0 service-account.json | pbcopy # (or xclip -selection clipboard)
-```
 
 ---
 
@@ -84,17 +81,17 @@ base64 -w 0 service-account.json | pbcopy # (or xclip -selection clipboard)
 ### Step 1: Push Code & Connect Vercel
 1. Push your repository to GitHub.
 2. Go to [Vercel](https://vercel.com/) and click **Add New** ➔ **Project**.
-3. Import your `pulse_expense` repository.
+3. Import your `financial-advisor-ai-agent` repository.
 
 ### Step 2: Configure Root Directory
 In the Vercel project configuration screen:
-- **Root Directory:** Set to `agent-api` *(Click Edit and select the `agent-api` folder)*.
+- **Root Directory:** Set to `agent-api` *(or `expense_pulse-main/agent-api` depending on your repo root)*.
 - **Framework Preset:** `Other`.
 
 ### Step 3: Add Environment Variables
 Under **Environment Variables**, add:
 - `GEMINI_API_KEY`: *(Your Google AI Studio key)*
-- `FIREBASE_SERVICE_ACCOUNT_BASE64`: *(The Base64 string generated above)*
+- `FIREBASE_PROJECT_ID`: *(Your Firebase Project ID, e.g. `pulse-expense-3156f`)*
 - `GEMINI_MODEL`: `gemini-2.5-flash`
 
 Click **Deploy**!
@@ -108,7 +105,7 @@ Run the complete zero-network test suite:
 cd agent-api
 npm test
 ```
-All 19 unit tests validate authentication, state machine transitions, math accuracy, anomaly thresholds, recurring bills detection, injection defense, and PII masking.
+All unit tests validate JWKS RS256 token verification, Firestore REST converters and preconditions, state machine transitions, math accuracy, anomaly thresholds, recurring bills detection, injection defense, and PII masking.
 
 ---
 
@@ -124,7 +121,7 @@ curl -X GET https://your-agent-api.vercel.app/api/health
   "ok": true,
   "service": "pulse-expense-agent-api",
   "version": "1.0.0",
-  "timestamp": "2026-10-20T07:20:00.000Z"
+  "timestamp": "2026-10-20T08:15:00.000Z"
 }
 ```
 

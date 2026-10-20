@@ -5,7 +5,7 @@
  * Headers: Authorization: Bearer <Firebase ID token>
  */
 const { handleCors, authenticateRequest } = require("../lib/auth");
-const { getDb } = require("../lib/db");
+const { FirestoreRestClient } = require("../lib/db");
 const { checkRateLimit } = require("../lib/ratelimit");
 const { runAgent } = require("../lib/gemini");
 
@@ -21,11 +21,10 @@ module.exports = async function handler(req, res) {
   const auth = await authenticateRequest(req, res);
   if (!auth) return; // 401 already sent by authenticateRequest
 
-  const { uid, docId } = auth;
-  const db = getDb();
+  const { uid, docId, idToken } = auth;
 
-  // 2. Rate Limit Check
-  const rateCheck = await checkRateLimit(db, uid);
+  // 2. Rate Limit Check (In-memory best-effort per instance)
+  const rateCheck = checkRateLimit(uid);
   if (!rateCheck.allowed) {
     res.setHeader("Retry-After", String(rateCheck.retryAfter || 60));
     res.status(429).json({
@@ -46,9 +45,14 @@ module.exports = async function handler(req, res) {
     return;
   }
 
+  const client = new FirestoreRestClient({
+    idToken,
+    projectId: process.env.FIREBASE_PROJECT_ID,
+  });
+
   try {
     const agentResult = await runAgent({
-      db,
+      client,
       uid,
       docId,
       message: message.trim(),

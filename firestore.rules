@@ -61,16 +61,19 @@ service cloud.firestore {
           && request.resource.data.targetAmount > 0;
       }
 
-      // Pending Confirmation Actions: Client may read only (server creates/updates via Admin SDK)
+      // Pending Confirmation Actions: Owner can read, create PENDING, and update to valid statuses
       match /pending_actions/{actionId} {
         allow read: if isOwner(userDocId);
-        allow write: if false;
+        allow create: if isOwner(userDocId) && request.resource.data.status == 'PENDING';
+        allow update: if isOwner(userDocId) && request.resource.data.status in ['PENDING', 'CONFIRMED', 'REJECTED', 'EXPIRED'];
+        allow delete: if isOwner(userDocId);
       }
 
-      // Audit Logs: Client may read only; creation and modification are restricted to server Admin SDK
+      // Audit Logs: Append-only for owner with matching uid; update and delete strictly prohibited
       match /audit_logs/{logId} {
         allow read: if isOwner(userDocId);
-        allow write: if false;
+        allow create: if isOwner(userDocId) && request.resource.data.uid == request.auth.uid;
+        allow update, delete: if false;
       }
     }
 

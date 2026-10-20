@@ -130,7 +130,7 @@ async function callGeminiApi({ model, apiKey, systemInstruction, contents, tools
       system_instruction: { parts: [{ text: systemInstruction }] },
       tools,
       generation_config: {
-        temperature: 0.2, // Low temperature for factual precision
+        temperature: 0.2,
         max_output_tokens: 1024,
       },
     }),
@@ -143,13 +143,13 @@ async function callGeminiApi({ model, apiKey, systemInstruction, contents, tools
  * Deterministic Offline Rule Engine Fallback
  * Used when Gemini API key is missing or when the API is unreachable.
  */
-async function generateDeterministicFallback({ db, uid, docId, message }) {
+async function generateDeterministicFallback({ client, uid, docId, message }) {
   const lower = message.toLowerCase();
   const toolCalls = [];
   let reply = "";
 
   if (lower.includes("unusual") || lower.includes("spike") || lower.includes("high")) {
-    const unusual = await executeTier1Tool(db, docId, "find_unusual_spending");
+    const unusual = await executeTier1Tool(client, docId, "find_unusual_spending");
     toolCalls.push({ name: "find_unusual_spending", args: {}, tier: 1 });
 
     if (unusual.length === 0) {
@@ -159,7 +159,7 @@ async function generateDeterministicFallback({ db, uid, docId, message }) {
         unusual.map((u) => `• ${u.category}: ৳${u.amount.toFixed(2)} on ${u.date} (${u.spikeRatio}x above average ৳${u.categoryAverage.toFixed(2)})`).join("\n");
     }
   } else if (lower.includes("recurring") || lower.includes("bill") || lower.includes("subscription")) {
-    const bills = await executeTier1Tool(db, docId, "detect_recurring_bills");
+    const bills = await executeTier1Tool(client, docId, "detect_recurring_bills");
     toolCalls.push({ name: "detect_recurring_bills", args: {}, tier: 1 });
 
     if (bills.length === 0) {
@@ -169,11 +169,11 @@ async function generateDeterministicFallback({ db, uid, docId, message }) {
         bills.map((b) => `• ${b.title}: ~৳${b.avgAmount.toFixed(2)} around day ${b.typicalDay} of each month (Trend: ${b.trend})`).join("\n");
     }
   } else if (lower.includes("budget") || lower.includes("spend") || lower.includes("status")) {
-    const status = await executeTier1Tool(db, docId, "get_budget_status");
+    const status = await executeTier1Tool(client, docId, "get_budget_status");
     toolCalls.push({ name: "get_budget_status", args: {}, tier: 1 });
 
     if (status.budgets.length === 0) {
-      const summary = await executeTier1Tool(db, docId, "get_summary");
+      const summary = await executeTier1Tool(client, docId, "get_summary");
       toolCalls.push({ name: "get_summary", args: {}, tier: 1 });
       reply = `📊 Monthly Spending Summary (${summary.month}):\n` +
         `• Total Income: ৳${summary.totalIncome.toFixed(2)}\n` +
@@ -188,7 +188,7 @@ async function generateDeterministicFallback({ db, uid, docId, message }) {
       }
     }
   } else {
-    const summary = await executeTier1Tool(db, docId, "get_summary");
+    const summary = await executeTier1Tool(client, docId, "get_summary");
     toolCalls.push({ name: "get_summary", args: {}, tier: 1 });
     reply = `📊 Financial Overview for ${summary.month}:\n` +
       `1. Income: ৳${summary.totalIncome.toFixed(2)}\n` +
@@ -210,14 +210,14 @@ async function generateDeterministicFallback({ db, uid, docId, message }) {
 /**
  * Main Agent Execution Loop
  */
-async function runAgent({ db, uid, docId, message, history = [] }) {
+async function runAgent({ client, uid, docId, message, history = [] }) {
   const apiKey = process.env.GEMINI_API_KEY;
   let primaryModel = process.env.GEMINI_MODEL || "gemini-2.5-flash";
   const fallbackModel = "gemini-2.5-flash-lite";
 
   // If no Gemini API key configured, use deterministic rule engine
   if (!apiKey || apiKey === "YOUR_GEMINI_API_KEY_HERE") {
-    return generateDeterministicFallback({ db, uid, docId, message });
+    return generateDeterministicFallback({ client, uid, docId, message });
   }
 
   // 1. Build sanitized contents array with PII masking
@@ -259,7 +259,7 @@ async function runAgent({ db, uid, docId, message, history = [] }) {
       });
     } catch (netErr) {
       console.error("Gemini network error, attempting offline fallback:", netErr.message);
-      return generateDeterministicFallback({ db, uid, docId, message });
+      return generateDeterministicFallback({ client, uid, docId, message });
     }
 
     // Handle 429 Rate Limit or 503 Overloaded: Retry once with lite model
@@ -272,13 +272,13 @@ async function runAgent({ db, uid, docId, message, history = [] }) {
     if (!response.ok) {
       const errBody = await response.text();
       console.error(`Gemini API error (${response.status}):`, errBody);
-      return generateDeterministicFallback({ db, uid, docId, message });
+      return generateDeterministicFallback({ client, uid, docId, message });
     }
 
     const data = await response.json();
     const candidate = data.candidates && data.candidates[0];
     if (!candidate || !candidate.content) {
-      return generateDeterministicFallback({ db, uid, docId, message });
+      return generateDeterministicFallback({ client, uid, docId, message });
     }
 
     const parts = candidate.content.parts || [];
@@ -315,7 +315,7 @@ async function runAgent({ db, uid, docId, message, history = [] }) {
     let toolResult;
     try {
       if (toolTier === 2) {
-        toolResult = await executeTier2Tool(db, uid, docId, toolName, toolArgs);
+        toolResult = await executeTier2Tool(client, uid, docId, toolName, toolArgs);
         pendingAction = {
           id: toolResult.actionId,
           uid,
@@ -328,11 +328,11 @@ async function runAgent({ db, uid, docId, message, history = [] }) {
           expiresAt: toolResult.expiresAt,
         };
       } else {
-        toolResult = await executeTier1Tool(db, docId, toolName, toolArgs);
+        toolResult = await executeTier1Tool(client, docId, toolName, toolArgs);
       }
 
       // Record audit log for the tool call
-      await logAudit(db, {
+      await logAudit(client, {
         uid,
         docId,
         actionId: toolResult.actionId || null,
@@ -387,7 +387,7 @@ async function runAgent({ db, uid, docId, message, history = [] }) {
   }
 
   // Fallback if loop exceeded max iterations
-  return generateDeterministicFallback({ db, uid, docId, message });
+  return generateDeterministicFallback({ client, uid, docId, message });
 }
 
 module.exports = {

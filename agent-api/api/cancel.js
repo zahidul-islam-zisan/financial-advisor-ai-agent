@@ -4,9 +4,9 @@
  * Body: { actionId: string }
  * Headers: Authorization: Bearer <Firebase ID token>
  */
-const { admin } = require("../lib/db");
+const { randomUUID } = require("crypto");
 const { handleCors, authenticateRequest } = require("../lib/auth");
-const { getDb } = require("../lib/db");
+const { FirestoreRestClient, toFirestoreFields } = require("../lib/db");
 
 module.exports = async function handler(req, res) {
   if (handleCors(req, res)) return;
@@ -20,7 +20,7 @@ module.exports = async function handler(req, res) {
   const auth = await authenticateRequest(req, res);
   if (!auth) return;
 
-  const { uid, docId } = auth;
+  const { uid, docId, idToken } = auth;
   const { actionId } = req.body || {};
 
   if (!actionId || typeof actionId !== "string" || actionId.trim().length === 0) {
@@ -28,67 +28,91 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  const db = getDb();
-  if (!db) {
-    res.status(500).json({ error: "Database service unavailable." });
-    return;
-  }
+  const client = new FirestoreRestClient({
+    idToken,
+    projectId: process.env.FIREBASE_PROJECT_ID,
+  });
 
-  const actionRef = db.collection("users").doc(docId).collection("pending_actions").doc(actionId.trim());
+  const encodedDocId = encodeURIComponent(docId);
+  const cleanActionId = actionId.trim();
+  const pendingActionPath = `users/${encodedDocId}/pending_actions/${cleanActionId}`;
 
   try {
-    const result = await db.runTransaction(async (transaction) => {
-      const snap = await transaction.get(actionRef);
-      if (!snap.exists) {
-        return { errorStatus: 404, message: "Pending action not found." };
-      }
-
-      const action = snap.data();
-
-      // Security Check: Ownership
-      if (action.uid !== uid) {
-        return { errorStatus: 403, message: "Forbidden: You do not own this pending action." };
-      }
-
-      if (action.status !== "PENDING") {
-        return { errorStatus: 400, message: `Action cannot be cancelled (status: ${action.status}).` };
-      }
-
-      const nowTimestamp = admin.firestore.Timestamp.now();
-
-      // Write Cancellation Audit Record
-      const auditLogRef = db.collection("users").doc(docId).collection("audit_logs").doc();
-      transaction.set(auditLogRef, {
-        id: auditLogRef.id,
-        uid,
-        docId,
-        actionId: actionId.trim(),
-        actionType: action.actionType || "UNKNOWN",
-        status: "CANCELLED",
-        summary: `User explicitly cancelled proposed action: ${action.title || actionId}`,
-        details: action.parameters || {},
-        timestamp: nowTimestamp,
-        verifiedByServer: true,
-      });
-
-      // Update pending action to REJECTED
-      transaction.update(actionRef, {
-        status: "REJECTED",
-        cancelledAt: nowTimestamp,
-        auditLogId: auditLogRef.id,
-      });
-
-      return { success: true };
-    });
-
-    if (result.errorStatus) {
-      res.status(result.errorStatus).json({ error: result.message });
+    const pendingDoc = await client.getDoc(pendingActionPath);
+    if (!pendingDoc || !pendingDoc.fields) {
+      res.status(404).json({ error: "Pending action not found." });
       return;
     }
 
-    res.status(200).json(result);
+    const action = pendingDoc.fields;
+
+    // Security Check: Ownership
+    if (action.uid !== uid) {
+      res.status(403).json({ error: "Forbidden: You do not own this pending action." });
+      return;
+    }
+
+    if (action.status !== "PENDING") {
+      res.status(400).json({ error: `Action cannot be cancelled (status: ${action.status}).` });
+      return;
+    }
+
+    const now = new Date();
+    const auditLogId = randomUUID();
+    const auditDocPath = `users/${encodedDocId}/audit_logs/${auditLogId}`;
+
+    const writes = [
+      // 1. Update pending action to REJECTED with updateTime precondition
+      {
+        update: {
+          name: client.docResourceName(pendingActionPath),
+          fields: {
+            status: { stringValue: "REJECTED" },
+            cancelledAt: { timestampValue: now.toISOString() },
+            auditLogId: { stringValue: auditLogId },
+          },
+        },
+        updateMask: {
+          fieldPaths: ["status", "cancelledAt", "auditLogId"],
+        },
+        currentDocument: {
+          updateTime: pendingDoc.updateTime,
+        },
+      },
+      // 2. Write audit log
+      {
+        update: {
+          name: client.docResourceName(auditDocPath),
+          fields: toFirestoreFields({
+            id: auditLogId,
+            uid,
+            docId,
+            actionId: cleanActionId,
+            actionType: action.actionType || "UNKNOWN",
+            status: "CANCELLED",
+            summary: `User explicitly cancelled proposed action: ${action.title || cleanActionId}`,
+            details: action.parameters || {},
+            timestamp: now,
+            writtenViaAgentApi: true,
+          }),
+        },
+      },
+    ];
+
+    await client.commit(writes);
+
+    res.status(200).json({ success: true });
   } catch (err) {
-    console.error("Action cancellation transaction error:", err.message);
+    console.error("Action cancellation commit error:", err.message);
+    const msg = (err.message || "").toLowerCase();
+    if (msg.includes("precondition") || msg.includes("already") || msg.includes("conflict")) {
+      res.status(409).json({ error: "Action already processed. Replay blocked." });
+      return;
+    }
+    if (msg.includes("permission denied") || msg.includes("403")) {
+      res.status(403).json({ error: "Permission denied by security rules." });
+      return;
+    }
     res.status(500).json({ error: "Failed to cancel financial action." });
   }
 };

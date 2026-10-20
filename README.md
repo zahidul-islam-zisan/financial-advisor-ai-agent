@@ -55,6 +55,14 @@ ExpensePulse (`expense_tracker_app`) is an intelligent financial management plat
 └─────────────────────────────────────────────────────────────┘
 ```
 
+### ⚡ Vercel Serverless Agent Backend (`agent-api/`)
+A dedicated serverless backend is provided in `agent-api/` that operates on the 100% free tier (Vercel Hobby + Firebase Spark):
+- **Zero Service Account Requirement:** Operates without `firebase-admin` or private service keys.
+- **ID Token Verification:** Verifies the user's Firebase Bearer ID Token locally using `jose` against Google's public JWKS.
+- **Firestore REST Client:** Performs reads, paginated collection queries, and atomic precondition commits directly with the user's ID token.
+- **Anti-Replay Preconditions:** Financial actions update `pending_actions` and write `budgets`/`savings_goals` atomically with `currentDocument.updateTime` preconditions.
+- See [agent-api/README.md](agent-api/README.md) for full deployment instructions and API documentation.
+
 ---
 
 ## 🚀 Getting Started & Running Locally

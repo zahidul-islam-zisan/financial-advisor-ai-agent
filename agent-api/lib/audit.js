@@ -1,29 +1,26 @@
 /**
- * Server-Side Audit Logger
- * Writes tamper-evident records to users/{docId}/audit_logs/{id}
+ * Audit Logger
+ * Writes audit records to users/{docId}/audit_logs/{id}
+ * Uses FirestoreRestClient to write directly with user's ID token.
  */
-const { admin } = require("./db");
 
-async function logAudit(db, { uid, docId, actionId = null, actionType, status, summary, details = {} }) {
-  if (!db || !docId) {
+const { randomUUID } = require("crypto");
+
+async function logAudit(client, { uid, docId, actionId = null, actionType, status, summary, details = {} }) {
+  if (!client || !docId) {
     return null;
   }
 
   try {
-    // Sanitize details: ensure no tokens, keys, or raw full texts are recorded
     const sanitizedDetails = { ...details };
     delete sanitizedDetails.token;
     delete sanitizedDetails.apiKey;
     delete sanitizedDetails.password;
     delete sanitizedDetails.rawResponse;
 
-    const logRef = db.collection("users").doc(docId).collection("audit_logs").doc();
-    const now = (admin && admin.firestore && admin.firestore.Timestamp)
-      ? admin.firestore.Timestamp.now()
-      : new Date();
-
+    const logId = randomUUID();
     const record = {
-      id: logRef.id,
+      id: logId,
       uid,
       docId,
       actionId,
@@ -31,11 +28,17 @@ async function logAudit(db, { uid, docId, actionId = null, actionType, status, s
       status, // SUCCESS, FAILED, CANCELLED, REJECTED
       summary: summary || "",
       details: sanitizedDetails,
-      timestamp: now,
-      verifiedByServer: true,
+      timestamp: new Date(),
+      writtenViaAgentApi: true,
     };
 
-    await logRef.set(record);
+    await client.createDoc(
+      `users/${encodeURIComponent(docId)}`,
+      "audit_logs",
+      logId,
+      record
+    );
+
     return record;
   } catch (err) {
     console.error("Failed to write audit log:", err.message);

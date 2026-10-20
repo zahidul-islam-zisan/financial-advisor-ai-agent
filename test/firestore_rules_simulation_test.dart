@@ -63,7 +63,7 @@ class FirestoreSecurityRuleSimulator {
     return true;
   }
 
-  // Evaluates pending action rules: allow read: if isOwner; allow write: if false;
+  // Evaluates pending action rules
   static bool evaluatePendingActionRead({
     required Map<String, dynamic>? auth,
     required String userDocId,
@@ -71,15 +71,33 @@ class FirestoreSecurityRuleSimulator {
     return isOwner(auth: auth, userDocId: userDocId);
   }
 
-  static bool evaluatePendingActionWrite({
+  static bool evaluatePendingActionCreate({
+    required Map<String, dynamic>? auth,
+    required String userDocId,
+    required Map<String, dynamic> data,
+  }) {
+    if (!isOwner(auth: auth, userDocId: userDocId)) return false;
+    return data['status'] == 'PENDING';
+  }
+
+  static bool evaluatePendingActionUpdate({
+    required Map<String, dynamic>? auth,
+    required String userDocId,
+    required Map<String, dynamic> data,
+  }) {
+    if (!isOwner(auth: auth, userDocId: userDocId)) return false;
+    final status = data['status'];
+    return status == 'PENDING' || status == 'CONFIRMED' || status == 'REJECTED' || status == 'EXPIRED';
+  }
+
+  static bool evaluatePendingActionDelete({
     required Map<String, dynamic>? auth,
     required String userDocId,
   }) {
-    // Strictly disallowed for client SDK (created/updated exclusively by serverless agent)
-    return false;
+    return isOwner(auth: auth, userDocId: userDocId);
   }
 
-  // Evaluates audit log rules: allow read: if isOwner; allow write: if false;
+  // Evaluates audit log rules: allow read: if isOwner; allow create: if isOwner && data.uid == request.auth.uid; allow update, delete: if false;
   static bool evaluateAuditLogRead({
     required Map<String, dynamic>? auth,
     required String userDocId,
@@ -87,12 +105,27 @@ class FirestoreSecurityRuleSimulator {
     return isOwner(auth: auth, userDocId: userDocId);
   }
 
-  static bool evaluateAuditLogWrite({
+  static bool evaluateAuditLogCreate({
+    required Map<String, dynamic>? auth,
+    required String userDocId,
+    required Map<String, dynamic> data,
+  }) {
+    if (!isOwner(auth: auth, userDocId: userDocId)) return false;
+    return data['uid'] == auth?['uid'];
+  }
+
+  static bool evaluateAuditLogUpdate({
     required Map<String, dynamic>? auth,
     required String userDocId,
   }) {
-    // Strictly disallowed for client SDK (written exclusively by server Admin SDK)
-    return false;
+    return false; // strictly prohibited
+  }
+
+  static bool evaluateAuditLogDelete({
+    required Map<String, dynamic>? auth,
+    required String userDocId,
+  }) {
+    return false; // strictly prohibited
   }
 
   // Evaluates rate_limits rules: allow read, write: if false;
@@ -151,32 +184,31 @@ void main() {
         FirestoreSecurityRuleSimulator.evaluateProfileWrite(
           auth: aliceAuth,
           userDocId: aliceDocId,
-          data: {'name': 'Alice', 'password': 'plaintext_secret_123'},
+          data: {'name': 'Alice', 'password': 'plainTextPassword123'},
         ),
         isFalse,
-        reason: 'CRITICAL: firestore.rules must block any write containing password field',
+      );
+
+      // Cross-user write attempt with or without password -> BLOCKED
+      expect(
+        FirestoreSecurityRuleSimulator.evaluateProfileWrite(
+          auth: bobAuth,
+          userDocId: aliceDocId,
+          data: {'name': 'Hacker Bob'},
+        ),
+        isFalse,
       );
     });
 
-    test('Rule 3: Transaction Amount Validation (Zero and Negative Numbers Denied)', () {
-      // Valid positive transaction -> ALLOWED
+    test('Rule 3: Transaction Amount Must be a Positive Number', () {
+      // Valid positive amount -> ALLOWED
       expect(
         FirestoreSecurityRuleSimulator.evaluateTransactionWrite(
           auth: aliceAuth,
           userDocId: aliceDocId,
-          data: {'amount': 150.0, 'type': 'expense'},
+          data: {'amount': 150.50, 'categoryName': 'Groceries'},
         ),
         isTrue,
-      );
-
-      // Negative amount -> DENIED
-      expect(
-        FirestoreSecurityRuleSimulator.evaluateTransactionWrite(
-          auth: aliceAuth,
-          userDocId: aliceDocId,
-          data: {'amount': -50.0, 'type': 'expense'},
-        ),
-        isFalse,
       );
 
       // Zero amount -> DENIED
@@ -184,17 +216,27 @@ void main() {
         FirestoreSecurityRuleSimulator.evaluateTransactionWrite(
           auth: aliceAuth,
           userDocId: aliceDocId,
-          data: {'amount': 0, 'type': 'expense'},
+          data: {'amount': 0, 'categoryName': 'Groceries'},
         ),
         isFalse,
       );
 
-      // Non-numeric amount -> DENIED
+      // Negative amount -> DENIED
       expect(
         FirestoreSecurityRuleSimulator.evaluateTransactionWrite(
           auth: aliceAuth,
           userDocId: aliceDocId,
-          data: {'amount': "500", 'type': 'expense'},
+          data: {'amount': -50.0, 'categoryName': 'Groceries'},
+        ),
+        isFalse,
+      );
+
+      // String amount instead of number -> DENIED
+      expect(
+        FirestoreSecurityRuleSimulator.evaluateTransactionWrite(
+          auth: aliceAuth,
+          userDocId: aliceDocId,
+          data: {'amount': '150.50', 'categoryName': 'Groceries'},
         ),
         isFalse,
       );
@@ -242,7 +284,7 @@ void main() {
       );
     });
 
-    test('Rule 5: Pending Actions Client Access Control (Read-Only for Client, Server-Managed)', () {
+    test('Rule 5: Pending Actions Access Control & Lifecycle Validation', () {
       // Owner can read pending actions -> ALLOWED
       expect(
         FirestoreSecurityRuleSimulator.evaluatePendingActionRead(
@@ -261,17 +303,60 @@ void main() {
         isFalse,
       );
 
-      // Direct client creation/update -> STRICTLY DENIED (managed exclusively by server)
+      // Owner creating with status 'PENDING' -> ALLOWED
       expect(
-        FirestoreSecurityRuleSimulator.evaluatePendingActionWrite(
+        FirestoreSecurityRuleSimulator.evaluatePendingActionCreate(
           auth: aliceAuth,
           userDocId: aliceDocId,
+          data: {'status': 'PENDING', 'actionType': 'CREATE_BUDGET'},
+        ),
+        isTrue,
+      );
+
+      // Owner creating with status 'CONFIRMED' directly -> DENIED
+      expect(
+        FirestoreSecurityRuleSimulator.evaluatePendingActionCreate(
+          auth: aliceAuth,
+          userDocId: aliceDocId,
+          data: {'status': 'CONFIRMED'},
+        ),
+        isFalse,
+      );
+
+      // Non-owner creating pending action -> DENIED
+      expect(
+        FirestoreSecurityRuleSimulator.evaluatePendingActionCreate(
+          auth: bobAuth,
+          userDocId: aliceDocId,
+          data: {'status': 'PENDING'},
+        ),
+        isFalse,
+      );
+
+      // Owner updating to valid statuses -> ALLOWED
+      for (final status in ['PENDING', 'CONFIRMED', 'REJECTED', 'EXPIRED']) {
+        expect(
+          FirestoreSecurityRuleSimulator.evaluatePendingActionUpdate(
+            auth: aliceAuth,
+            userDocId: aliceDocId,
+            data: {'status': status},
+          ),
+          isTrue,
+        );
+      }
+
+      // Owner updating to invalid status -> DENIED
+      expect(
+        FirestoreSecurityRuleSimulator.evaluatePendingActionUpdate(
+          auth: aliceAuth,
+          userDocId: aliceDocId,
+          data: {'status': 'RANDOM_STATUS'},
         ),
         isFalse,
       );
     });
 
-    test('Rule 6: Audit Logs & Rate Limits Server-Only Enforcement', () {
+    test('Rule 6: Audit Logs Append-Only and Tamper-Resistant Enforcement', () {
       // Owner can read their own audit logs -> ALLOWED
       expect(
         FirestoreSecurityRuleSimulator.evaluateAuditLogRead(
@@ -290,9 +375,46 @@ void main() {
         isFalse,
       );
 
-      // Client creating or modifying audit logs -> STRICTLY DENIED (written only by Admin SDK)
+      // Owner creating audit log with their own UID -> ALLOWED
       expect(
-        FirestoreSecurityRuleSimulator.evaluateAuditLogWrite(
+        FirestoreSecurityRuleSimulator.evaluateAuditLogCreate(
+          auth: aliceAuth,
+          userDocId: aliceDocId,
+          data: {'uid': 'alice_123', 'status': 'SUCCESS'},
+        ),
+        isTrue,
+      );
+
+      // Owner creating audit log impersonating another UID -> DENIED
+      expect(
+        FirestoreSecurityRuleSimulator.evaluateAuditLogCreate(
+          auth: aliceAuth,
+          userDocId: aliceDocId,
+          data: {'uid': 'bob_456', 'status': 'SUCCESS'},
+        ),
+        isFalse,
+      );
+
+      // Non-owner creating audit log -> DENIED
+      expect(
+        FirestoreSecurityRuleSimulator.evaluateAuditLogCreate(
+          auth: bobAuth,
+          userDocId: aliceDocId,
+          data: {'uid': 'alice_123'},
+        ),
+        isFalse,
+      );
+
+      // Updating or deleting audit logs -> STRICTLY PROHIBITED (append-only)
+      expect(
+        FirestoreSecurityRuleSimulator.evaluateAuditLogUpdate(
+          auth: aliceAuth,
+          userDocId: aliceDocId,
+        ),
+        isFalse,
+      );
+      expect(
+        FirestoreSecurityRuleSimulator.evaluateAuditLogDelete(
           auth: aliceAuth,
           userDocId: aliceDocId,
         ),

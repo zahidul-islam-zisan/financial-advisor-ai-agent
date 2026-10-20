@@ -2,9 +2,11 @@
  * Pulse Expense Agent Deterministic Tools
  * Tier 1 (Read-only, auto-executed, plain JavaScript math)
  * Tier 2 (Proposals only, creates PENDING pending_action in Firestore)
+ * 
+ * Interacts with Firestore via FirestoreRestClient (User ID token)
  */
 
-const { admin } = require("./db");
+const { randomUUID } = require("crypto");
 const { wrapUntrustedData, sanitizeString } = require("./guard");
 const { validateToolCall } = require("./validate");
 
@@ -145,12 +147,6 @@ function computeRecurringBills(expenses) {
     const amounts = items.map((i) => Number(i.amount) || 0);
     const avgAmount = amounts.reduce((a, b) => a + b, 0) / amounts.length;
 
-    // Check if amounts are within ±15% of the average
-    const varianceCheck = amounts.every((amt) => Math.abs(amt - avgAmount) <= avgAmount * 0.25);
-    if (!varianceCheck && items.length > 2) {
-      // Allow minor fluctuations for utilities like electricity
-    }
-
     // Determine typical day of month
     const days = items
       .map((i) => (i.date ? parseInt(i.date.substring(8, 10), 10) : null))
@@ -240,49 +236,34 @@ function computeBudgetProposal(monthlyIncome, categoryAverages) {
 }
 
 // =========================================================================
-// FIRESTORE TOOL EXECUTORS
+// FIRESTORE TOOL EXECUTORS (Uses FirestoreRestClient)
 // =========================================================================
 
-async function executeTier1Tool(db, docId, toolName, args = {}) {
+async function executeTier1Tool(client, docId, toolName, args = {}) {
   const validation = validateToolCall(toolName, args);
   if (!validation.valid) {
     throw new Error(validation.error);
   }
 
+  const encodedUserDoc = encodeURIComponent(docId);
+
   switch (toolName) {
     case "get_summary": {
       const { targetMonth, start, end } = getMonthRange(args.month);
-      const snap = await db
-        .collection("users")
-        .doc(docId)
-        .collection("income_expenses")
-        .where("date", ">=", start)
-        .where("date", "<", end)
-        .get();
-
-      const transactions = snap.docs.map((d) => d.data());
-      return computeSummary(transactions, targetMonth);
+      const all = await client.listCollection(`users/${encodedUserDoc}/income_expenses`);
+      const filtered = all.filter((t) => t.date && t.date >= start && t.date < end);
+      return computeSummary(filtered, targetMonth);
     }
 
     case "get_transactions": {
-      let query = db
-        .collection("users")
-        .doc(docId)
-        .collection("income_expenses");
+      const all = await client.listCollection(`users/${encodedUserDoc}/income_expenses`);
+      let list = all;
 
       if (args.month) {
         const { start, end } = getMonthRange(args.month);
-        query = query.where("date", ">=", start).where("date", "<", end);
+        list = list.filter((t) => t.date && t.date >= start && t.date < end);
       }
 
-      const snap = await query.get();
-      let list = snap.docs.map((d) => {
-        const data = d.data();
-        data.id = d.id;
-        return data;
-      });
-
-      // Filter by category in memory
       if (args.category) {
         const filterCat = args.category.toLowerCase().trim();
         list = list.filter(
@@ -290,7 +271,6 @@ async function executeTier1Tool(db, docId, toolName, args = {}) {
         );
       }
 
-      // Sort in memory by date descending to avoid composite index requirement
       list.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
 
       const limit = Math.min(Number(args.limit) || 10, 50);
@@ -306,49 +286,24 @@ async function executeTier1Tool(db, docId, toolName, args = {}) {
     }
 
     case "find_unusual_spending": {
-      // Look back across last 90 days to gather category baseline
-      const snap = await db
-        .collection("users")
-        .doc(docId)
-        .collection("income_expenses")
-        .where("isIncome", "==", false)
-        .get();
-
-      const expenses = snap.docs.map((d) => {
-        const data = d.data();
-        data.id = d.id;
-        return data;
-      });
-
+      const all = await client.listCollection(`users/${encodedUserDoc}/income_expenses`);
+      const expenses = all.filter((t) => t.isIncome !== true);
       return computeUnusualSpending(expenses);
     }
 
     case "detect_recurring_bills": {
-      const snap = await db
-        .collection("users")
-        .doc(docId)
-        .collection("income_expenses")
-        .where("isIncome", "==", false)
-        .get();
-
-      const expenses = snap.docs.map((d) => d.data());
+      const all = await client.listCollection(`users/${encodedUserDoc}/income_expenses`);
+      const expenses = all.filter((t) => t.isIncome !== true);
       return computeRecurringBills(expenses);
     }
 
     case "analyze_bill": {
-      const snap = await db
-        .collection("users")
-        .doc(docId)
-        .collection("income_expenses")
-        .where("isIncome", "==", false)
-        .get();
-
+      const all = await client.listCollection(`users/${encodedUserDoc}/income_expenses`);
       const searchTitle = (args.title || "").toLowerCase().trim();
-      const matching = snap.docs
-        .map((d) => d.data())
+      const matching = all
+        .filter((t) => t.isIncome !== true)
         .filter((t) => (t.description || "").toLowerCase().includes(searchTitle));
 
-      // Group by month
       const monthly = {};
       for (const t of matching) {
         const m = (t.date || "").substring(0, 7);
@@ -380,15 +335,9 @@ async function executeTier1Tool(db, docId, toolName, args = {}) {
     }
 
     case "forecast_next_month": {
-      const snap = await db
-        .collection("users")
-        .doc(docId)
-        .collection("income_expenses")
-        .where("isIncome", "==", false)
-        .get();
+      const all = await client.listCollection(`users/${encodedUserDoc}/income_expenses`);
+      const expenses = all.filter((t) => t.isIncome !== true);
 
-      const expenses = snap.docs.map((d) => d.data());
-      // Group by month and category
       const monthCatMap = {};
       for (const t of expenses) {
         const m = (t.date || "").substring(0, 7);
@@ -432,14 +381,7 @@ async function executeTier1Tool(db, docId, toolName, args = {}) {
     }
 
     case "propose_budget": {
-      // Gather average monthly income and category expenses
-      const snap = await db
-        .collection("users")
-        .doc(docId)
-        .collection("income_expenses")
-        .get();
-
-      const all = snap.docs.map((d) => d.data());
+      const all = await client.listCollection(`users/${encodedUserDoc}/income_expenses`);
       const incomeMonths = {};
       const expenseMonths = {};
 
@@ -470,24 +412,15 @@ async function executeTier1Tool(db, docId, toolName, args = {}) {
     case "get_budget_status": {
       const { targetMonth, start, end } = getMonthRange();
 
-      const budgetsSnap = await db
-        .collection("users")
-        .doc(docId)
-        .collection("budgets")
-        .get();
+      const budgetsDocs = await client.listCollection(`users/${encodedUserDoc}/budgets`);
+      const allExpenses = await client.listCollection(`users/${encodedUserDoc}/income_expenses`);
 
-      const expensesSnap = await db
-        .collection("users")
-        .doc(docId)
-        .collection("income_expenses")
-        .where("isIncome", "==", false)
-        .where("date", ">=", start)
-        .where("date", "<", end)
-        .get();
+      const currentMonthExpenses = allExpenses.filter(
+        (t) => t.isIncome !== true && t.date && t.date >= start && t.date < end
+      );
 
       const spentMap = {};
-      for (const d of expensesSnap.docs) {
-        const t = d.data();
+      for (const t of currentMonthExpenses) {
         const cat = (t.category_name || t.categoryName || "Other").toLowerCase().replace(/\s+/g, "_");
         spentMap[cat] = (spentMap[cat] || 0) + (Number(t.amount) || 0);
       }
@@ -497,9 +430,8 @@ async function executeTier1Tool(db, docId, toolName, args = {}) {
       let totalLimit = 0;
       let totalSpent = 0;
 
-      for (const d of budgetsSnap.docs) {
-        const b = d.data();
-        const slug = d.id;
+      for (const b of budgetsDocs) {
+        const slug = b.id;
         const limit = Number(b.limit) || 0;
         const spent = spentMap[slug] || 0;
         const remaining = limit - spent;
@@ -546,15 +478,16 @@ async function executeTier1Tool(db, docId, toolName, args = {}) {
 // TIER 2 PROPOSAL TOOLS (Creates PENDING action, never modifies budget/goal directly)
 // =========================================================================
 
-async function executeTier2Tool(db, uid, docId, toolName, args = {}) {
+async function executeTier2Tool(client, uid, docId, toolName, args = {}) {
   const validation = validateToolCall(toolName, args);
   if (!validation.valid) {
     throw new Error(validation.error);
   }
 
-  const actionRef = db.collection("users").doc(docId).collection("pending_actions").doc();
-  const now = admin.firestore.Timestamp.now();
-  const expiresAt = admin.firestore.Timestamp.fromMillis(Date.now() + 15 * 60 * 1000); // 15 mins
+  const actionId = randomUUID();
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + 15 * 60 * 1000); // 15 mins
+  const encodedUserDoc = encodeURIComponent(docId);
 
   if (toolName === "create_budget") {
     const category = args.category.trim();
@@ -562,7 +495,7 @@ async function executeTier2Tool(db, uid, docId, toolName, args = {}) {
     const title = `Set Monthly Budget for ${category}: ৳${limit.toFixed(2)}`;
 
     const pendingAction = {
-      id: actionRef.id,
+      id: actionId,
       uid,
       docId,
       actionType: "CREATE_BUDGET",
@@ -573,15 +506,20 @@ async function executeTier2Tool(db, uid, docId, toolName, args = {}) {
       expiresAt,
     };
 
-    await actionRef.set(pendingAction);
+    await client.createDoc(
+      `users/${encodedUserDoc}`,
+      "pending_actions",
+      actionId,
+      pendingAction
+    );
 
     return {
       status: "needs_confirmation",
-      actionId: actionRef.id,
+      actionId,
       actionType: "CREATE_BUDGET",
       title,
       parameters: { category, limit },
-      expiresAt: expiresAt.toDate().toISOString(),
+      expiresAt: expiresAt.toISOString(),
     };
   }
 
@@ -593,7 +531,7 @@ async function executeTier2Tool(db, uid, docId, toolName, args = {}) {
     const title = `Create Savings Goal '${goalName}': ৳${targetAmount.toFixed(2)} in ${targetMonths} months (৳${monthlyRequired.toFixed(2)}/mo)`;
 
     const pendingAction = {
-      id: actionRef.id,
+      id: actionId,
       uid,
       docId,
       actionType: "CREATE_SAVINGS_GOAL",
@@ -609,15 +547,20 @@ async function executeTier2Tool(db, uid, docId, toolName, args = {}) {
       expiresAt,
     };
 
-    await actionRef.set(pendingAction);
+    await client.createDoc(
+      `users/${encodedUserDoc}`,
+      "pending_actions",
+      actionId,
+      pendingAction
+    );
 
     return {
       status: "needs_confirmation",
-      actionId: actionRef.id,
+      actionId,
       actionType: "CREATE_SAVINGS_GOAL",
       title,
       parameters: pendingAction.parameters,
-      expiresAt: expiresAt.toDate().toISOString(),
+      expiresAt: expiresAt.toISOString(),
     };
   }
 
