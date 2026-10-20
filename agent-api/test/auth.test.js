@@ -1,14 +1,18 @@
 const { describe, it, before } = require("node:test");
 const assert = require("node:assert");
-const { generateKeyPair, SignJWT } = require("jose");
 const { buildUserDocId, verifyFirebaseToken, authenticateRequest } = require("../lib/auth");
 
 describe("Auth Middleware & Token Verification", () => {
   const TEST_PROJECT_ID = "test-pulse-project";
+  let generateKeyPair;
+  let SignJWT;
   let keyPair;
   let publicKey;
 
   before(async () => {
+    const jose = await import("jose");
+    generateKeyPair = jose.generateKeyPair;
+    SignJWT = jose.SignJWT;
     keyPair = await generateKeyPair("RS256");
     publicKey = keyPair.publicKey;
   });

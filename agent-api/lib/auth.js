@@ -2,15 +2,34 @@
  * Authentication Middleware for Pulse Expense
  * Verifies Firebase ID Tokens locally using Google's JWKS and 'jose'
  * NO service account or firebase-admin required.
+ * Uses lazy dynamic import of 'jose' to support CommonJS on Vercel without ERR_REQUIRE_ESM.
  */
-const { jwtVerify, createRemoteJWKSet } = require("jose");
+
+let _jose = null;
+
+async function getJose() {
+  if (!_jose) {
+    _jose = await import("jose");
+  }
+  return _jose;
+}
+
+function _setJose(mockJose) {
+  _jose = mockJose;
+}
+
+let _customVerifier = null;
+function _setCustomVerifier(fn) {
+  _customVerifier = fn;
+}
 
 const GOOGLE_JWKS_URL = "https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com";
 let defaultJWKS = null;
 
-function getJWKS() {
+async function getJWKS() {
   if (!defaultJWKS) {
-    defaultJWKS = createRemoteJWKSet(new URL(GOOGLE_JWKS_URL));
+    const jose = await getJose();
+    defaultJWKS = jose.createRemoteJWKSet(new URL(GOOGLE_JWKS_URL));
   }
   return defaultJWKS;
 }
@@ -43,16 +62,22 @@ function buildUserDocId(arg1, arg2) {
 
 /**
  * Verifies a Firebase ID token.
- * Can accept optional options for testing (e.g. custom key/JWKS, projectId).
+ * Can accept optional options for testing (e.g. custom key/JWKS, projectId, verifier).
  */
 async function verifyFirebaseToken(token, options = {}) {
+  if (options.verifier || _customVerifier) {
+    const fn = options.verifier || _customVerifier;
+    return fn(token, options);
+  }
+
   const projectId = options.projectId || process.env.FIREBASE_PROJECT_ID || "pulse-expense-3156f";
-  const jwks = options.jwks || getJWKS();
+  const jose = await getJose();
+  const jwks = options.jwks || (await getJWKS());
 
   const issuer = `https://securetoken.google.com/${projectId}`;
   const audience = projectId;
 
-  const { payload, protectedHeader } = await jwtVerify(token, jwks, {
+  const { payload, protectedHeader } = await jose.jwtVerify(token, jwks, {
     issuer,
     audience,
     algorithms: ["RS256"],
@@ -124,6 +149,9 @@ async function authenticateRequest(req, res, options = {}) {
 }
 
 module.exports = {
+  getJose,
+  _setJose,
+  _setCustomVerifier,
   handleCors,
   buildUserDocId,
   verifyFirebaseToken,

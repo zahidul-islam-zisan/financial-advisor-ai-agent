@@ -45,9 +45,15 @@ module.exports = async function handler(req, res) {
     return;
   }
 
+  const projectId = process.env.FIREBASE_PROJECT_ID;
+  if (!projectId) {
+    res.status(500).json({ error: "Internal server error: configuration missing." });
+    return;
+  }
+
   const client = new FirestoreRestClient({
     idToken,
-    projectId: process.env.FIREBASE_PROJECT_ID,
+    projectId,
   });
 
   try {

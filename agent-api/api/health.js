@@ -2,10 +2,15 @@
  * Health Check Endpoint
  * GET /api/health
  */
-const { handleCors } = require("../lib/auth");
-
 module.exports = async function handler(req, res) {
-  if (handleCors(req, res)) return;
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
+
+  if (req.method === "OPTIONS") {
+    res.status(204).end();
+    return;
+  }
 
   if (req.method !== "GET") {
     res.status(405).json({ error: "Method not allowed. Use GET." });
@@ -14,8 +19,6 @@ module.exports = async function handler(req, res) {
 
   res.status(200).json({
     ok: true,
-    service: "pulse-expense-agent-api",
     version: "1.0.0",
-    timestamp: new Date().toISOString(),
   });
 };

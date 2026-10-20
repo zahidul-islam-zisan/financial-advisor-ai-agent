@@ -1,14 +1,20 @@
 const { describe, it, before, afterEach } = require("node:test");
 const assert = require("node:assert");
-const { generateKeyPair, SignJWT } = require("jose");
 const confirmHandler = require("../api/confirm");
 
 describe("2-Step Confirmation State Machine & Security Controls", () => {
   const TEST_PROJECT_ID = "test-pulse-project";
+  let generateKeyPair;
+  let SignJWT;
+  let exportJWK;
   let keyPair;
   let originalFetch;
 
   before(async () => {
+    const jose = await import("jose");
+    generateKeyPair = jose.generateKeyPair;
+    SignJWT = jose.SignJWT;
+    exportJWK = jose.exportJWK;
     keyPair = await generateKeyPair("RS256");
     process.env.FIREBASE_PROJECT_ID = TEST_PROJECT_ID;
   });
@@ -75,7 +81,7 @@ describe("2-Step Confirmation State Machine & Security Controls", () => {
     globalThis.fetch = async (url, options) => {
       // 1. Google JWKS mock fetch for token verification
       if (url.includes("googleapis.com/service_accounts/v1/jwk")) {
-        const jwk = await require("jose").exportJWK(keyPair.publicKey);
+        const jwk = await exportJWK(keyPair.publicKey);
         jwk.alg = "RS256";
         jwk.use = "sig";
         return {
@@ -165,7 +171,7 @@ describe("2-Step Confirmation State Machine & Security Controls", () => {
 
     globalThis.fetch = async (url) => {
       if (url.includes("googleapis.com/service_accounts/v1/jwk")) {
-        const jwk = await require("jose").exportJWK(keyPair.publicKey);
+        const jwk = await exportJWK(keyPair.publicKey);
         jwk.alg = "RS256";
         return { ok: true, status: 200, json: async () => ({ keys: [jwk] }) };
       }
@@ -211,7 +217,7 @@ describe("2-Step Confirmation State Machine & Security Controls", () => {
 
     globalThis.fetch = async (url) => {
       if (url.includes("googleapis.com/service_accounts/v1/jwk")) {
-        const jwk = await require("jose").exportJWK(keyPair.publicKey);
+        const jwk = await exportJWK(keyPair.publicKey);
         jwk.alg = "RS256";
         return { ok: true, status: 200, json: async () => ({ keys: [jwk] }) };
       }
@@ -256,7 +262,7 @@ describe("2-Step Confirmation State Machine & Security Controls", () => {
 
     globalThis.fetch = async (url) => {
       if (url.includes("googleapis.com/service_accounts/v1/jwk")) {
-        const jwk = await require("jose").exportJWK(keyPair.publicKey);
+        const jwk = await exportJWK(keyPair.publicKey);
         jwk.alg = "RS256";
         return { ok: true, status: 200, json: async () => ({ keys: [jwk] }) };
       }
