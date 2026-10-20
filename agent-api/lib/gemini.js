@@ -365,6 +365,10 @@ async function runAgent({ client, uid, docId, message, history = [] }) {
 
     let response;
     try {
+      // Debug: log the roles being sent in this iteration
+      const rolesSummary = contents.map(c => c.role).join(" → ");
+      console.log(`[Gemini Loop] Iteration ${iterations}, Model: ${currentModel}, Turns: ${contents.length}, Roles: ${rolesSummary}`);
+      
       response = await callGeminiApi({
         model: currentModel,
         apiKey,
@@ -430,7 +434,7 @@ async function runAgent({ client, uid, docId, message, history = [] }) {
       }
 
       console.error(
-        `[Gemini Error] HTTP Status: ${response.status}, Error Status: ${errStatus || "N/A"}, Error Message: ${errMessage || "N/A"}, Model: ${currentModel}`
+        `[Gemini Error] HTTP Status: ${response.status}, Error Status: ${errStatus || "N/A"}, Error Message: ${errMessage || "N/A"}, Model: ${currentModel}, Iteration: ${iterations}, ContentsTurns: ${contents.length}`
       );
 
       const offlineReason = mapStatusToOfflineReason(response.status);
@@ -550,25 +554,32 @@ async function runAgent({ client, uid, docId, message, history = [] }) {
     }
 
     // Append model functionCall and function response parts to conversation contents
-    // Important: In Gemini API, functionResponse must be inside a 'user' turn (not 'function')
+    // Gemini 3.x requires: functionResponse in a turn with role "function", 
+    // and the id field from the functionCall must be echoed back.
     contents.push({
       role: "model",
       parts: [{ functionCall }],
     });
 
+    // Build functionResponse with id matching (required for Gemini 3.x+)
+    const functionResponsePart = {
+      functionResponse: {
+        name: toolName,
+        response: {
+          name: toolName,
+          content: toolResult,
+        },
+      },
+    };
+
+    // If the model's functionCall included an id, echo it in the response
+    if (functionCall.id) {
+      functionResponsePart.functionResponse.id = functionCall.id;
+    }
+
     contents.push({
       role: "user",
-      parts: [
-        {
-          functionResponse: {
-            name: toolName,
-            response: {
-              name: toolName,
-              content: toolResult,
-            },
-          },
-        },
-      ],
+      parts: [functionResponsePart],
     });
   }
 

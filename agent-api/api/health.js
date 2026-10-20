@@ -30,13 +30,45 @@ module.exports = async function handler(req, res) {
   const urlObj = new URL(req.url, `https://${req.headers.host || "localhost"}`);
   
   // Optional in-cloud Gemini test WITH tool declarations
+  if (urlObj.searchParams.get("checkListModels") === "true") {
+    if (!hasApiKey) {
+      res.status(200).json({ ok: false, error: "GEMINI_API_KEY missing" });
+      return;
+    }
+    try {
+      const gRes = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models`,
+        {
+          method: "GET",
+          headers: {
+            "x-goog-api-key": key,
+          },
+        }
+      );
+      const data = await gRes.json();
+      const modelNames = (data.models || []).map((m) => m.name.replace("models/", ""));
+      res.status(200).json({
+        ok: gRes.ok,
+        status: gRes.status,
+        modelsCount: modelNames.length,
+        models: modelNames,
+      });
+      return;
+    } catch (err) {
+      res.status(200).json({ ok: false, error: err.message });
+      return;
+    }
+  }
+
+  // Optional in-cloud Gemini test WITH tool declarations
   if (urlObj.searchParams.get("checkTools") === "true") {
     if (!hasApiKey) {
       res.status(200).json({ ok: false, error: "GEMINI_API_KEY missing" });
       return;
     }
     try {
-      const cleanModel = model.startsWith("models/") ? model.slice(7) : model;
+      const chosenModel = (urlObj.searchParams.get("model") || model).trim();
+      const cleanModel = chosenModel.startsWith("models/") ? chosenModel.slice(7) : chosenModel;
       const gRes = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent`,
         {
@@ -91,7 +123,8 @@ module.exports = async function handler(req, res) {
       return;
     }
     try {
-      const cleanModel = model.startsWith("models/") ? model.slice(7) : model;
+      const chosenModel = (urlObj.searchParams.get("model") || model).trim();
+      const cleanModel = chosenModel.startsWith("models/") ? chosenModel.slice(7) : chosenModel;
       const diagnosticLog = [];
 
       // Step 1: Send initial user message with tools
@@ -175,19 +208,25 @@ module.exports = async function handler(req, res) {
         role: "model",
         parts: [{ functionCall }],
       });
+
+      // Build functionResponse with id matching (required for Gemini 3.x+)
+      const functionResponsePart = {
+        functionResponse: {
+          name: functionCall.name,
+          response: {
+            name: functionCall.name,
+            content: mockToolResult,
+          },
+        },
+      };
+      // If the model's functionCall included an id, echo it back
+      if (functionCall.id) {
+        functionResponsePart.functionResponse.id = functionCall.id;
+      }
+      
       contents.push({
         role: "user",
-        parts: [
-          {
-            functionResponse: {
-              name: functionCall.name,
-              response: {
-                name: functionCall.name,
-                content: mockToolResult,
-              },
-            },
-          },
-        ],
+        parts: [functionResponsePart],
       });
 
       diagnosticLog.push({
@@ -269,7 +308,8 @@ module.exports = async function handler(req, res) {
     }
 
     try {
-      const cleanModel = model.startsWith("models/") ? model.slice(7) : model;
+      const chosenModel = (urlObj.searchParams.get("model") || model).trim();
+      const cleanModel = chosenModel.startsWith("models/") ? chosenModel.slice(7) : chosenModel;
       const gRes = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent`,
         {
