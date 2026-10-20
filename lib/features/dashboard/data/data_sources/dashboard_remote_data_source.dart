@@ -9,10 +9,21 @@ import '../../../../core/error/firebase_exception_handler.dart';
 import '../../../transactions/data/models/transaction_list_response_model.dart';
 
 class DashboardRemoteDataSource {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final _auth = FirebaseAuth.instance;
-  String get uid => _auth.currentUser?.uid ?? "";
-  String get email => _auth.currentUser?.email ?? "";
+  final FirebaseFirestore? _firestore;
+  final FirebaseAuth? _auth;
+
+  DashboardRemoteDataSource({
+    FirebaseFirestore? firestore,
+    FirebaseAuth? auth,
+  })  : _firestore = firestore,
+        _auth = auth;
+
+  FirebaseFirestore get _effectiveFirestore =>
+      _firestore ?? FirebaseFirestore.instance;
+  FirebaseAuth get _effectiveAuth => _auth ?? FirebaseAuth.instance;
+
+  String get uid => _effectiveAuth.currentUser?.uid ?? "";
+  String get email => _effectiveAuth.currentUser?.email ?? "";
   String get docId => email.isNotEmpty && uid.isNotEmpty ? "${email}_$uid" : "";
   Future<Either<Failure, List<TransactionListResponseModel>>> getDashboardData(
     String? status,
@@ -27,7 +38,7 @@ class DashboardRemoteDataSource {
       final lastOfMonth =
           "$nextMonthYear-${nextMonth.toString().padLeft(2, '0')}-01";
       if (status == 'Monthly') {
-        final transactions = await _firestore
+        final transactions = await _effectiveFirestore
             .collection("users")
             .doc(docId)
             .collection("income_expenses")
@@ -41,7 +52,7 @@ class DashboardRemoteDataSource {
           "DASHBOARD transaction Summery: ${transactionList.map((e) => e.toJson()).toList()}",
         );
       } else {
-        final transactions = await _firestore
+        final transactions = await _effectiveFirestore
             .collection("users")
             .doc(docId)
             .collection("income_expenses")

@@ -82,7 +82,7 @@ class AiMessageBubble extends StatelessWidget {
                   // Interactive Human Confirmation Card
                   if (message.pendingAction != null) ...[
                     const SizedBox(height: 10),
-                    _buildConfirmationCard(context, message.pendingAction!),
+                    ConfirmationCardWidget(action: message.pendingAction!),
                   ],
 
                   const SizedBox(height: 4),
@@ -142,137 +142,13 @@ class AiMessageBubble extends StatelessWidget {
           Icon(Icons.bolt, size: 12, color: Colors.amber),
           SizedBox(width: 4),
           Text(
-            "Offline Rule Engine",
+            "Offline Mode",
             style: TextStyle(
               fontSize: 10,
               fontWeight: FontWeight.bold,
               color: Colors.amber,
             ),
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildConfirmationCard(
-    BuildContext context,
-    PendingFinancialActionModel action,
-  ) {
-    final isPending = action.isPending;
-    final isConfirmed = action.isConfirmed;
-    final isRejected = action.isRejected;
-
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: isConfirmed
-            ? AppColors.primary.withValues(alpha: 0.1)
-            : isRejected
-                ? Colors.red.withValues(alpha: 0.1)
-                : const Color.fromARGB(255, 30, 36, 75),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isConfirmed
-              ? AppColors.primary
-              : isRejected
-                  ? Colors.redAccent.withValues(alpha: 0.5)
-                  : AppColors.primaryLight.withValues(alpha: 0.5),
-          width: 1.2,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(
-                isConfirmed
-                    ? Icons.check_circle
-                    : isRejected
-                        ? Icons.cancel
-                        : Icons.security,
-                size: 16,
-                color: isConfirmed
-                    ? AppColors.primary
-                    : isRejected
-                        ? Colors.redAccent
-                        : AppColors.primaryLight,
-              ),
-              const SizedBox(width: 6),
-              Text(
-                isConfirmed
-                    ? "Action Confirmed & Executed"
-                    : isRejected
-                        ? "Action Cancelled"
-                        : "Human Authorization Required",
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                  color: isConfirmed
-                      ? AppColors.primary
-                      : isRejected
-                          ? Colors.redAccent
-                          : AppColors.primaryLight,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(
-            action.title,
-            style: const TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: Colors.white,
-            ),
-          ),
-          if (isPending) ...[
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.white70,
-                      side: const BorderSide(color: Colors.white30),
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                    onPressed: () {
-                      context.read<AiAssistantBloc>().add(
-                            RejectPendingActionEvent(action.id),
-                          );
-                    },
-                    child: const Text("Cancel", style: TextStyle(fontSize: 12)),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primary,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                    onPressed: () {
-                      context.read<AiAssistantBloc>().add(
-                            ConfirmPendingActionEvent(action.id),
-                          );
-                    },
-                    child: const Text(
-                      "Confirm & Save",
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
         ],
       ),
     );
@@ -367,6 +243,179 @@ class AiMessageBubble extends StatelessWidget {
     return SelectableText.rich(
       TextSpan(children: spans),
       style: const TextStyle(fontFamily: 'Poppins'),
+    );
+  }
+}
+
+/// Dedicated Confirmation Card with single-tap protection and loading indicator
+class ConfirmationCardWidget extends StatefulWidget {
+  final PendingFinancialActionModel action;
+
+  const ConfirmationCardWidget({super.key, required this.action});
+
+  @override
+  State<ConfirmationCardWidget> createState() => _ConfirmationCardWidgetState();
+}
+
+class _ConfirmationCardWidgetState extends State<ConfirmationCardWidget> {
+  bool _isProcessing = false;
+  String? _processingType;
+
+  void _onConfirm() {
+    if (_isProcessing) return;
+    setState(() {
+      _isProcessing = true;
+      _processingType = 'confirm';
+    });
+    context
+        .read<AiAssistantBloc>()
+        .add(ConfirmPendingActionEvent(widget.action.id));
+  }
+
+  void _onCancel() {
+    if (_isProcessing) return;
+    setState(() {
+      _isProcessing = true;
+      _processingType = 'cancel';
+    });
+    context
+        .read<AiAssistantBloc>()
+        .add(RejectPendingActionEvent(widget.action.id));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final action = widget.action;
+    final isPending = action.isPending;
+    final isConfirmed = action.isConfirmed;
+    final isRejected = action.isRejected;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isConfirmed
+            ? AppColors.primary.withValues(alpha: 0.1)
+            : isRejected
+                ? Colors.red.withValues(alpha: 0.1)
+                : const Color.fromARGB(255, 30, 36, 75),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isConfirmed
+              ? AppColors.primary
+              : isRejected
+                  ? Colors.redAccent.withValues(alpha: 0.5)
+                  : AppColors.primaryLight.withValues(alpha: 0.5),
+          width: 1.2,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                isConfirmed
+                    ? Icons.check_circle
+                    : isRejected
+                        ? Icons.cancel
+                        : Icons.security,
+                size: 16,
+                color: isConfirmed
+                    ? AppColors.primary
+                    : isRejected
+                        ? Colors.redAccent
+                        : AppColors.primaryLight,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                isConfirmed
+                    ? "Action Confirmed & Executed"
+                    : isRejected
+                        ? "Action Cancelled"
+                        : "Human Authorization Required",
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: isConfirmed
+                      ? AppColors.primary
+                      : isRejected
+                          ? Colors.redAccent
+                          : AppColors.primaryLight,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            action.title,
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: Colors.white,
+            ),
+          ),
+          if (isPending) ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white70,
+                      side: const BorderSide(color: Colors.white30),
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    onPressed: _isProcessing ? null : _onCancel,
+                    child: _isProcessing && _processingType == 'cancel'
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white70,
+                            ),
+                          )
+                        : const Text("Cancel", style: TextStyle(fontSize: 12)),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    onPressed: _isProcessing ? null : _onConfirm,
+                    child: _isProcessing && _processingType == 'confirm'
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Text(
+                            "Confirm & Save",
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
     );
   }
 }

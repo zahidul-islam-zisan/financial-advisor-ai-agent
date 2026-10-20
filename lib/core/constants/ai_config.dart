@@ -1,15 +1,5 @@
 class AiConfig {
-  /// Default Gemini API Key.
-  /// You can get a 100% FREE API key from Google AI Studio:
-  /// https://aistudio.google.com/app/apikey
-  /// 
-  /// Paste your API key here or enter it inside the app via the AI Assistant screen settings!
-  static String defaultGeminiApiKey = "";
-
-  /// Active runtime API key (can be changed from within the app)
-  static String activeApiKey = defaultGeminiApiKey;
-
-  /// Gemini model name (gemini-2.5-flash with function calling support)
+  /// Gemini model name
   static const String modelName = "gemini-2.5-flash";
 
   /// System instructions for the financial AI assistant
@@ -23,12 +13,13 @@ Your goals are:
 5. If the user asks about topics unrelated to finance, budgeting, expenses, or personal improvement, politely redirect them back to financial health and expense management.
 """;
 
-  /// Predefined quick questions for the user to tap
+  /// Predefined quick suggestion chips for the user
   static const List<String> quickSuggestions = [
-    "📊 How am I spending my money?",
-    "💡 Give me tips to save money",
-    "🎯 How does the 50/30/20 budget work?",
-    "💰 Where can I cut unnecessary expenses?",
-    "📉 Help me plan my monthly budget",
+    "How am I spending this month?",
+    "Find unusual spending",
+    "Detect my recurring bills",
+    "Suggest a budget for me",
+    "Am I over budget anywhere?",
+    "Help me save 30000 in 6 months",
   ];
 }

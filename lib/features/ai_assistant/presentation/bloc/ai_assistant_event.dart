@@ -12,11 +12,6 @@ class LoadFinancialContextEvent extends AiAssistantEvent {}
 
 class ClearChatEvent extends AiAssistantEvent {}
 
-class UpdateApiKey extends AiAssistantEvent {
-  final String apiKey;
-  UpdateApiKey(this.apiKey);
-}
-
 class ConfirmPendingActionEvent extends AiAssistantEvent {
   final String actionId;
   ConfirmPendingActionEvent(this.actionId);

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../core/constants/ai_config.dart';
 import '../../../../core/constants/app_colors.dart';
@@ -56,119 +55,6 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
     context.read<AiAssistantBloc>().add(SendAiMessageEvent(text));
     _textController.clear();
     _scrollToBottom();
-  }
-
-  void _showApiKeyDialog(BuildContext context) {
-    final keyController = TextEditingController(
-      text: AiConfig.activeApiKey.isNotEmpty ? AiConfig.activeApiKey : "",
-    );
-
-    showDialog(
-      context: context,
-      builder: (dialogCtx) {
-        return AlertDialog(
-          backgroundColor: const Color.fromARGB(255, 15, 20, 45),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-            side: const BorderSide(color: Colors.white12),
-          ),
-          title: Row(
-            children: const [
-              Icon(Icons.key, color: AppColors.primary, size: 22),
-              SizedBox(width: 8),
-              Text(
-                'Gemini API Key',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Enter your Google Gemini API key to activate live real-time AI responses.',
-                style: TextStyle(color: Colors.white70, fontSize: 13),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: keyController,
-                obscureText: true,
-                style: const TextStyle(color: Colors.white),
-                decoration: InputDecoration(
-                  hintText: 'AIzaSy...',
-                  hintStyle: const TextStyle(color: Colors.white38),
-                  filled: true,
-                  fillColor: Colors.white.withValues(alpha: 0.05),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: const BorderSide(color: Colors.white24),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: const BorderSide(color: AppColors.primary),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 14),
-              InkWell(
-                onTap: () async {
-                  final uri = Uri.parse('https://aistudio.google.com/app/apikey');
-                  if (await canLaunchUrl(uri)) {
-                    await launchUrl(uri, mode: LaunchMode.externalApplication);
-                  }
-                },
-                child: Row(
-                  children: const [
-                    Icon(Icons.open_in_new, color: AppColors.primaryLight, size: 16),
-                    SizedBox(width: 6),
-                    Text(
-                      'Get a 100% Free API Key',
-                      style: TextStyle(
-                        color: AppColors.primaryLight,
-                        fontSize: 13,
-                        decoration: TextDecoration.underline,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
-              onPressed: () => Navigator.pop(dialogCtx),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-              child: const Text('Save Key'),
-              onPressed: () {
-                final key = keyController.text.trim();
-                context.read<AiAssistantBloc>().add(UpdateApiKey(key));
-                Navigator.pop(dialogCtx);
-                CustomSnackbar.showSuccess(
-                  context: context,
-                  message: key.isEmpty
-                      ? 'API key cleared'
-                      : 'Gemini API Key updated successfully!',
-                );
-              },
-            ),
-          ],
-        );
-      },
-    );
   }
 
   void _showClearConfirmation(BuildContext context) {
@@ -243,11 +129,6 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
         ),
         actions: [
           IconButton(
-            tooltip: 'Gemini API Key Settings',
-            icon: const Icon(Icons.key, color: AppColors.primary),
-            onPressed: () => _showApiKeyDialog(context),
-          ),
-          IconButton(
             tooltip: 'Clear Conversation',
             icon: const Icon(Icons.delete_outline, color: Colors.white70),
             onPressed: () => _showClearConfirmation(context),
@@ -257,11 +138,22 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
       body: SafeArea(
         child: Column(
           children: [
-            // Messages List
+            // Messages List with snackbar feedback for actions
             Expanded(
               child: BlocConsumer<AiAssistantBloc, AiAssistantState>(
                 listener: (context, state) {
                   _scrollToBottom();
+                  if (state.successMessage != null && state.successMessage!.isNotEmpty) {
+                    CustomSnackbar.showSuccess(
+                      context: context,
+                      message: state.successMessage!,
+                    );
+                  } else if (state.errorMessage != null && state.errorMessage!.isNotEmpty) {
+                    CustomSnackbar.showError(
+                      context: context,
+                      message: state.errorMessage!,
+                    );
+                  }
                 },
                 builder: (context, state) {
                   return ListView.builder(
@@ -310,9 +202,9 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
             // Chat input bar
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: const Color.fromARGB(255, 14, 16, 40),
-                border: const Border(
+              decoration: const BoxDecoration(
+                color: Color.fromARGB(255, 14, 16, 40),
+                border: Border(
                   top: BorderSide(color: Colors.white10),
                 ),
               ),
@@ -370,6 +262,22 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
                     },
                   ),
                 ],
+              ),
+            ),
+
+            // Disclaimer footer
+            Container(
+              width: double.infinity,
+              color: const Color.fromARGB(255, 14, 16, 40),
+              padding: const EdgeInsets.only(bottom: 6, top: 2),
+              child: const Text(
+                "This is a suggestion, not professional financial advice.",
+                style: TextStyle(
+                  fontSize: 10,
+                  color: Colors.white38,
+                  fontStyle: FontStyle.italic,
+                ),
+                textAlign: TextAlign.center,
               ),
             ),
           ],

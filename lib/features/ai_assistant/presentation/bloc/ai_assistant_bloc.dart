@@ -1,23 +1,31 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
-import '../../../../core/constants/ai_config.dart';
+import '../../../../core/services/agent_service.dart';
 import '../../../dashboard/data/data_sources/dashboard_remote_data_source.dart';
-import '../../data/data_sources/agent_action_data_source.dart';
 import '../../data/data_sources/ai_remote_data_source.dart';
 import '../../data/models/ai_message_model.dart';
 import 'ai_assistant_event.dart';
 import 'ai_assistant_state.dart';
 
 class AiAssistantBloc extends Bloc<AiAssistantEvent, AiAssistantState> {
-  final AiRemoteDataSource _aiRemoteDataSource = AiRemoteDataSource();
-  final AgentActionDataSource _agentActionDataSource = AgentActionDataSource();
-  final DashboardRemoteDataSource _dashboardRemoteDataSource =
-      DashboardRemoteDataSource();
+  final AiRemoteDataSource _aiRemoteDataSource;
+  final AgentService _agentService;
+  final DashboardRemoteDataSource? _dashboardRemoteDataSource;
 
-  AiAssistantBloc() : super(AiAssistantState.initial()) {
+  DashboardRemoteDataSource get _effectiveDashboard =>
+      _dashboardRemoteDataSource ?? DashboardRemoteDataSource();
+
+  AiAssistantBloc({
+    AiRemoteDataSource? aiRemoteDataSource,
+    AgentService? agentService,
+    DashboardRemoteDataSource? dashboardRemoteDataSource,
+  })  : _agentService = agentService ?? AgentService(),
+        _aiRemoteDataSource = aiRemoteDataSource ??
+            AiRemoteDataSource(agentService: agentService ?? AgentService()),
+        _dashboardRemoteDataSource = dashboardRemoteDataSource,
+        super(AiAssistantState.initial()) {
     on<SendAiMessageEvent>(_onSendAiMessage);
     on<LoadFinancialContextEvent>(_onLoadFinancialContext);
     on<ClearChatEvent>(_onClearChat);
-    on<UpdateApiKey>(_onUpdateApiKey);
     on<ConfirmPendingActionEvent>(_onConfirmPendingAction);
     on<RejectPendingActionEvent>(_onRejectPendingAction);
   }
@@ -53,6 +61,7 @@ class AiAssistantBloc extends Bloc<AiAssistantEvent, AiAssistantState> {
         messages: updatedMessages,
         isLoading: true,
         errorMessage: null,
+        successMessage: null,
       ),
     );
 
@@ -60,9 +69,6 @@ class AiAssistantBloc extends Bloc<AiAssistantEvent, AiAssistantState> {
       prompt: trimmedPrompt,
       history: state.messages,
       financialContext: state.financialContext,
-      customApiKey: state.apiKey.isNotEmpty
-          ? state.apiKey
-          : AiConfig.activeApiKey,
     );
 
     result.fold(
@@ -116,12 +122,17 @@ class AiAssistantBloc extends Bloc<AiAssistantEvent, AiAssistantState> {
     ConfirmPendingActionEvent event,
     Emitter<AiAssistantState> emit,
   ) async {
-    emit(state.copyWith(isLoading: true));
+    emit(state.copyWith(
+      isLoading: true,
+      operatingActionId: event.actionId,
+      errorMessage: null,
+      successMessage: null,
+    ));
 
-    final result = await _agentActionDataSource.confirmPendingAction(event.actionId);
+    final result = await _agentService.confirm(event.actionId);
 
-    result.fold(
-      (failure) {
+    await result.fold(
+      (failure) async {
         final errorMsg = AiMessageModel(
           id: DateTime.now().millisecondsSinceEpoch.toString(),
           text: "❌ Confirmation Failed: ${failure.message}",
@@ -132,9 +143,14 @@ class AiAssistantBloc extends Bloc<AiAssistantEvent, AiAssistantState> {
         emit(state.copyWith(
           messages: [...state.messages, errorMsg],
           isLoading: false,
+          clearOperatingAction: true,
+          errorMessage: failure.message,
         ));
       },
-      (successSummary) {
+      (data) async {
+        final successSummary = data['summary'] as String? ??
+            "Financial action confirmed and executed.";
+
         // Update the message containing this pending action to show CONFIRMED
         final updatedList = state.messages.map((m) {
           if (m.pendingAction?.id == event.actionId) {
@@ -147,14 +163,22 @@ class AiAssistantBloc extends Bloc<AiAssistantEvent, AiAssistantState> {
 
         final confirmMsg = AiMessageModel(
           id: DateTime.now().millisecondsSinceEpoch.toString(),
-          text: "✅ **Action Confirmed & Executed!**\n\n$successSummary\n\n*(Audit log entry created and verified in Firestore)*",
+          text:
+              "✅ **Action Confirmed & Executed!**\n\n$successSummary\n\n*(Verified and logged via Secure Agent API)*",
           isUser: false,
           timestamp: DateTime.now(),
         );
 
+        // Refresh dashboard data so updated budgets/goals reflect in UI
+        try {
+          await _effectiveDashboard.getDashboardData('Monthly');
+        } catch (_) {}
+
         emit(state.copyWith(
           messages: [...updatedList, confirmMsg],
           isLoading: false,
+          clearOperatingAction: true,
+          successMessage: successSummary,
         ));
       },
     );
@@ -164,13 +188,22 @@ class AiAssistantBloc extends Bloc<AiAssistantEvent, AiAssistantState> {
     RejectPendingActionEvent event,
     Emitter<AiAssistantState> emit,
   ) async {
-    emit(state.copyWith(isLoading: true));
+    emit(state.copyWith(
+      isLoading: true,
+      operatingActionId: event.actionId,
+      errorMessage: null,
+      successMessage: null,
+    ));
 
-    final result = await _agentActionDataSource.rejectPendingAction(event.actionId);
+    final result = await _agentService.cancel(event.actionId);
 
     result.fold(
       (failure) {
-        emit(state.copyWith(isLoading: false));
+        emit(state.copyWith(
+          isLoading: false,
+          clearOperatingAction: true,
+          errorMessage: failure.message,
+        ));
       },
       (_) {
         final updatedList = state.messages.map((m) {
@@ -192,6 +225,8 @@ class AiAssistantBloc extends Bloc<AiAssistantEvent, AiAssistantState> {
         emit(state.copyWith(
           messages: [...updatedList, cancelMsg],
           isLoading: false,
+          clearOperatingAction: true,
+          successMessage: "Action cancelled successfully.",
         ));
       },
     );
@@ -202,14 +237,16 @@ class AiAssistantBloc extends Bloc<AiAssistantEvent, AiAssistantState> {
     Emitter<AiAssistantState> emit,
   ) async {
     try {
-      final result = await _dashboardRemoteDataSource.getDashboardData('Monthly');
+      final result =
+          await _effectiveDashboard.getDashboardData('Monthly');
       result.fold(
         (failure) {},
         (transactions) {
           if (transactions.isEmpty) {
             emit(
               state.copyWith(
-                financialContext: "User has no transactions recorded yet for this month.",
+                financialContext:
+                    "User has no transactions recorded yet for this month.",
               ),
             );
             return;
@@ -224,16 +261,19 @@ class AiAssistantBloc extends Bloc<AiAssistantEvent, AiAssistantState> {
               totalIncome += t.amount;
             } else {
               totalExpense += t.amount;
-              final cat = t.categoryName.isNotEmpty ? t.categoryName : 'Other';
-              categoryExpenseMap[cat] = (categoryExpenseMap[cat] ?? 0) + t.amount;
+              final cat =
+                  t.categoryName.isNotEmpty ? t.categoryName : 'Other';
+              categoryExpenseMap[cat] =
+                  (categoryExpenseMap[cat] ?? 0) + t.amount;
             }
           }
 
           final buffer = StringBuffer();
           buffer.writeln("Monthly Summary:");
-          buffer.writeln("- Total Income: \$${totalIncome.toStringAsFixed(2)}");
-          buffer.writeln("- Total Expenses: \$${totalExpense.toStringAsFixed(2)}");
-          buffer.writeln("- Net Balance: \$${(totalIncome - totalExpense).toStringAsFixed(2)}");
+          buffer.writeln("- Total Income: ৳${totalIncome.toStringAsFixed(2)}");
+          buffer.writeln("- Total Expenses: ৳${totalExpense.toStringAsFixed(2)}");
+          buffer.writeln(
+              "- Net Balance: ৳${(totalIncome - totalExpense).toStringAsFixed(2)}");
 
           if (categoryExpenseMap.isNotEmpty) {
             buffer.writeln("\nExpense by Category:");
@@ -241,7 +281,7 @@ class AiAssistantBloc extends Bloc<AiAssistantEvent, AiAssistantState> {
               final pct = totalExpense > 0
                   ? (amt / totalExpense * 100).toStringAsFixed(1)
                   : "0";
-              buffer.writeln("- $cat: \$${amt.toStringAsFixed(2)} ($pct%)");
+              buffer.writeln("- $cat: ৳${amt.toStringAsFixed(2)} ($pct%)");
             });
           }
 
@@ -251,7 +291,7 @@ class AiAssistantBloc extends Bloc<AiAssistantEvent, AiAssistantState> {
             for (var t in recent) {
               final type = t.isIncome ? "Income" : "Expense";
               buffer.writeln(
-                "- ${t.date}: [$type] ${t.categoryName} - \$${t.amount} (${t.description ?? ''})",
+                "- ${t.date}: [$type] ${t.categoryName} - ৳${t.amount} (${t.description ?? ''})",
               );
             }
           }
@@ -266,13 +306,7 @@ class AiAssistantBloc extends Bloc<AiAssistantEvent, AiAssistantState> {
     emit(
       AiAssistantState.initial().copyWith(
         financialContext: state.financialContext,
-        apiKey: state.apiKey,
       ),
     );
-  }
-
-  void _onUpdateApiKey(UpdateApiKey event, Emitter<AiAssistantState> emit) {
-    AiConfig.activeApiKey = event.apiKey;
-    emit(state.copyWith(apiKey: event.apiKey));
   }
 }

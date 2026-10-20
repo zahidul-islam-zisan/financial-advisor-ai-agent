@@ -6,14 +6,18 @@ class AiAssistantState {
   final List<AiMessageModel> messages;
   final bool isLoading;
   final String? errorMessage;
+  final String? successMessage;
   final String? financialContext;
+  final String? operatingActionId;
   final String apiKey;
 
   const AiAssistantState({
     required this.messages,
     this.isLoading = false,
     this.errorMessage,
+    this.successMessage,
     this.financialContext,
+    this.operatingActionId,
     this.apiKey = '',
   });
 
@@ -29,7 +33,10 @@ class AiAssistantState {
         ),
       ],
       isLoading: false,
+      errorMessage: null,
+      successMessage: null,
       financialContext: null,
+      operatingActionId: null,
       apiKey: '',
     );
   }
@@ -38,14 +45,22 @@ class AiAssistantState {
     List<AiMessageModel>? messages,
     bool? isLoading,
     String? errorMessage,
+    String? successMessage,
     String? financialContext,
+    String? operatingActionId,
     String? apiKey,
+    bool clearOperatingAction = false,
+    bool clearMessages = false,
   }) {
     return AiAssistantState(
       messages: messages ?? this.messages,
       isLoading: isLoading ?? this.isLoading,
       errorMessage: errorMessage,
+      successMessage: successMessage,
       financialContext: financialContext ?? this.financialContext,
+      operatingActionId: clearOperatingAction
+          ? null
+          : (operatingActionId ?? this.operatingActionId),
       apiKey: apiKey ?? this.apiKey,
     );
   }
