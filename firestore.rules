@@ -1,0 +1,93 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper function: Check if caller is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Helper function: Check if user owns the document path
+    // Supports existing legacy format "{email}_{uid}" and standard "{uid}"
+    function isOwner(userDocId) {
+      return isAuthenticated() && (
+        userDocId == request.auth.token.email + '_' + request.auth.uid ||
+        userDocId == request.auth.uid
+      );
+    }
+
+    // User Root Document & Subcollections
+    match /users/{userDocId} {
+      allow read, write: if isOwner(userDocId);
+
+      // User Profile Info
+      match /profile/{profileDoc} {
+        allow read: if isOwner(userDocId);
+        // CRITICAL SECURITY CONTROL: Explicitly prohibit writing any password field to Firestore
+        allow write: if isOwner(userDocId) && !('password' in request.resource.data);
+      }
+
+      // Categories
+      match /categories/{categoryId} {
+        allow read: if isOwner(userDocId);
+        allow write: if isOwner(userDocId) 
+          && request.resource.data.name is string 
+          && request.resource.data.name.size() > 0 
+          && request.resource.data.name.size() <= 100;
+      }
+
+      // Income & Expenses Transactions
+      match /income_expenses/{transactionId} {
+        allow read: if isOwner(userDocId);
+        allow create, update: if isOwner(userDocId)
+          && request.resource.data.amount is number
+          && request.resource.data.amount > 0;
+        allow delete: if isOwner(userDocId);
+      }
+
+      // Budgets (Phase 3 agent support)
+      match /budgets/{budgetId} {
+        allow read: if isOwner(userDocId);
+        allow write: if isOwner(userDocId)
+          && request.resource.data.limit is number
+          && request.resource.data.limit > 0;
+      }
+
+      // Savings Goals (Phase 3 agent support)
+      match /savings_goals/{goalId} {
+        allow read: if isOwner(userDocId);
+        allow write: if isOwner(userDocId)
+          && request.resource.data.targetAmount is number
+          && request.resource.data.targetAmount > 0;
+      }
+
+      // Pending Confirmation Actions (Phase 3 human confirmation workflow)
+      match /pending_actions/{actionId} {
+        allow read: if isOwner(userDocId);
+        allow create: if isOwner(userDocId);
+        allow update: if isOwner(userDocId)
+          && request.resource.data.status in ['PENDING', 'CONFIRMED', 'REJECTED', 'EXPIRED'];
+        allow delete: if isOwner(userDocId);
+      }
+
+      // Audit Logs: Append-only, tamper-proof audit trail
+      match /audit_logs/{logId} {
+        allow read: if isOwner(userDocId);
+        allow create: if isOwner(userDocId);
+        // Strictly prevent tampering or deletion of existing audit logs
+        allow update, delete: if false;
+      }
+    }
+
+    // Public / Shared Tutorial Video (Read-only for authenticated users)
+    match /tutorial/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if false;
+    }
+
+    // Default Deny: All other documents are strictly private and cross-user access is denied
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
