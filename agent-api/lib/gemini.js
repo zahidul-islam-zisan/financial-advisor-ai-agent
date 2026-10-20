@@ -127,12 +127,12 @@ function setGeminiFetcher(fetcher) {
 
 /**
  * Extracts model name from env, trimming whitespace and stripping a leading "models/" only.
- * Defaults to "gemini-3.5-flash".
+ * Defaults to "gemini-3.5-flash-lite".
  */
 function getModelName(envModel) {
-  if (!envModel || typeof envModel !== "string") return "gemini-3.5-flash";
+  if (!envModel || typeof envModel !== "string") return "gemini-3.5-flash-lite";
   const trimmed = envModel.trim();
-  if (!trimmed) return "gemini-3.5-flash";
+  if (!trimmed) return "gemini-3.5-flash-lite";
   return trimmed.startsWith("models/") ? trimmed.slice(7) : trimmed;
 }
 
@@ -147,6 +147,55 @@ function mapStatusToOfflineReason(status) {
   if (status === 429) return "http_429";
   if (status >= 500 && status < 600) return "http_5xx";
   return "other";
+}
+
+/**
+ * Formats conversation history and incoming message to adhere strictly to Gemini API constraints:
+ * 1. The first turn in contents MUST be 'user' (strips leading assistant greetings).
+ * 2. Strict role alternation (user -> model -> user -> model).
+ * 3. Applies PII masking.
+ */
+function buildConversationContents({ history = [], message }) {
+  const rawTurns = [];
+  const safeHistory = (history || []).slice(-10);
+
+  for (const h of safeHistory) {
+    if (h && typeof h.text === "string" && h.text.trim() && !h.isLoading && !h.isError) {
+      rawTurns.push({
+        role: h.isUser ? "user" : "model",
+        parts: [{ text: maskPii(h.text.trim()) }],
+      });
+    }
+  }
+
+  // Add the incoming prompt as a user turn
+  rawTurns.push({
+    role: "user",
+    parts: [{ text: maskPii(message.trim()) }],
+  });
+
+  // Ensure first turn is 'user' (drop any leading model greetings like "Hi! I am Pulse AI...")
+  while (rawTurns.length > 0 && rawTurns[0].role !== "user") {
+    rawTurns.shift();
+  }
+
+  // Ensure strict role alternation (user -> model -> user -> model)
+  const normalizedContents = [];
+  for (const turn of rawTurns) {
+    if (normalizedContents.length === 0) {
+      normalizedContents.push(turn);
+    } else {
+      const prevTurn = normalizedContents[normalizedContents.length - 1];
+      if (prevTurn.role === turn.role) {
+        // Merge consecutive parts for same role
+        prevTurn.parts.push(...turn.parts);
+      } else {
+        normalizedContents.push(turn);
+      }
+    }
+  }
+
+  return normalizedContents;
 }
 
 /**
@@ -266,26 +315,12 @@ async function runAgent({ client, uid, docId, message, history = [] }) {
   }
 
   let primaryModel = getModelName(process.env.GEMINI_MODEL);
-  const fallbackModel = "gemini-3.5-flash-lite";
+  const fallbackModel = primaryModel === "gemini-3.5-flash-lite"
+    ? "gemini-3.5-flash"
+    : "gemini-3.5-flash-lite";
 
-  // 1. Build sanitized contents array with PII masking
-  const contents = [];
-  const safeHistory = (history || []).slice(-10);
-
-  for (const h of safeHistory) {
-    if (h.text && !h.isLoading && !h.isError) {
-      contents.push({
-        role: h.isUser ? "user" : "model",
-        parts: [{ text: maskPii(h.text) }],
-      });
-    }
-  }
-
-  // Add the current user prompt
-  contents.push({
-    role: "user",
-    parts: [{ text: maskPii(message) }],
-  });
+  // Build sanitized, validated contents array with PII masking and strict turn alternation
+  const contents = buildConversationContents({ history, message });
 
   const executedToolCalls = [];
   let pendingAction = null;
@@ -331,7 +366,7 @@ async function runAgent({ client, uid, docId, message, history = [] }) {
       continue;
     }
 
-    // Handle 429 Rate Limit or 503 Overloaded: Retry once with lite model if not already using it
+    // Handle 429 Rate Limit or 503 Overloaded: Retry once with fallback model if not already using it
     if ((response.status === 429 || response.status === 503) && currentModel !== fallbackModel) {
       console.warn(`[Gemini RateLimit/Overload] HTTP ${response.status} on ${currentModel}. Retrying with ${fallbackModel}...`);
       currentModel = fallbackModel;
@@ -483,6 +518,7 @@ async function runAgent({ client, uid, docId, message, history = [] }) {
     }
 
     // Append model functionCall and function response parts to conversation contents
+    // Important: In Gemini API, functionResponse must be inside a 'user' turn (not 'function')
     contents.push({
       role: "model",
       parts: [{ functionCall }],
@@ -519,6 +555,7 @@ module.exports = {
   TOOL_DECLARATIONS,
   getModelName,
   mapStatusToOfflineReason,
+  buildConversationContents,
   runAgent,
   generateDeterministicFallback,
   setGeminiFetcher,

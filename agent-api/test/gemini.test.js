@@ -189,20 +189,20 @@ describe("Gemini Agent API, Diagnostics & Tool Schema Tests", () => {
     assert.strictEqual(result.offlineReason, "timeout");
   });
 
-  it("7. getModelName uses GEMINI_MODEL exactly, trimming whitespace and stripping leading 'models/', defaulting to gemini-3.5-flash", () => {
-    assert.strictEqual(getModelName("gemini-3.5-flash"), "gemini-3.5-flash");
-    assert.strictEqual(getModelName("  gemini-3.5-flash  "), "gemini-3.5-flash");
-    assert.strictEqual(getModelName("models/gemini-3.5-flash"), "gemini-3.5-flash");
+  it("7. getModelName uses GEMINI_MODEL exactly, trimming whitespace and stripping leading 'models/', defaulting to gemini-3.5-flash-lite", () => {
+    assert.strictEqual(getModelName("gemini-3.5-flash-lite"), "gemini-3.5-flash-lite");
+    assert.strictEqual(getModelName("  gemini-3.5-flash-lite  "), "gemini-3.5-flash-lite");
+    assert.strictEqual(getModelName("models/gemini-3.5-flash-lite"), "gemini-3.5-flash-lite");
     assert.strictEqual(getModelName("models/my-custom-model"), "my-custom-model");
     assert.strictEqual(getModelName("my-custom-model"), "my-custom-model");
-    assert.strictEqual(getModelName(""), "gemini-3.5-flash");
-    assert.strictEqual(getModelName(undefined), "gemini-3.5-flash");
-    assert.strictEqual(getModelName("   "), "gemini-3.5-flash");
+    assert.strictEqual(getModelName(""), "gemini-3.5-flash-lite");
+    assert.strictEqual(getModelName(undefined), "gemini-3.5-flash-lite");
+    assert.strictEqual(getModelName("   "), "gemini-3.5-flash-lite");
   });
 
-  it("8. On 404, agent retries configured fallback model (gemini-3.5-flash-lite) once and succeeds", async () => {
+  it("8. On 404, agent retries configured fallback model (gemini-3.5-flash) once and succeeds", async () => {
     process.env.GEMINI_API_KEY = "valid-key";
-    delete process.env.GEMINI_MODEL; // defaults to gemini-3.5-flash
+    delete process.env.GEMINI_MODEL; // defaults to gemini-3.5-flash-lite
 
     let attempt = 0;
     const requestedUrls = [];
@@ -224,7 +224,7 @@ describe("Gemini Agent API, Diagnostics & Tool Schema Tests", () => {
           candidates: [
             {
               content: {
-                parts: [{ text: "Analysis generated after fallback to gemini-3.5-flash-lite." }],
+                parts: [{ text: "Analysis generated after fallback to gemini-3.5-flash." }],
               },
             },
           ],
@@ -242,8 +242,8 @@ describe("Gemini Agent API, Diagnostics & Tool Schema Tests", () => {
     assert.strictEqual(result.isOffline, false);
     assert.ok(result.reply.includes("Analysis generated after fallback"));
     assert.strictEqual(attempt, 2);
-    assert.ok(requestedUrls[0].includes("gemini-3.5-flash"));
-    assert.ok(requestedUrls[1].includes("gemini-3.5-flash-lite"));
+    assert.ok(requestedUrls[0].includes("gemini-3.5-flash-lite"));
+    assert.ok(requestedUrls[1].includes("gemini-3.5-flash"));
   });
 
   it("9. On 404 when fallback model also fails, returns offline fallback with offlineReason 'http_404'", async () => {

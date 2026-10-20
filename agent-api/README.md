@@ -3,7 +3,7 @@
 > **Platform:** Vercel Serverless Functions (Node.js 20, CommonJS)  
 > **Auth & Database:** Direct Firebase ID Token Verification (`jose` + Google JWKS) & Firestore REST API (Acts as signed-in user; zero service account keys required)  
 > **Cost Profile:** 100% Free Tier compatible (Vercel Hobby + Firebase Spark Free Plan)  
-> **LLM Engine:** Google Gemini 3.5 Flash (`gemini-3.5-flash` with automatic fallback to `gemini-3.5-flash-lite` and deterministic offline rule engine)  
+> **LLM Engine:** Google Gemini 3.5 Flash-Lite (`gemini-3.5-flash-lite` with automatic fallback to `gemini-3.5-flash` and deterministic offline rule engine)  
 
 ---
 
@@ -92,7 +92,7 @@ In the Vercel project configuration screen:
 Under **Environment Variables**, add:
 - `GEMINI_API_KEY`: *(Your Google AI Studio key)*
 - `FIREBASE_PROJECT_ID`: *(Your Firebase Project ID, e.g. `pulse-expense-3156f`)*
-- `GEMINI_MODEL`: `gemini-3.5-flash` (optional, defaults to `gemini-3.5-flash`)
+- `GEMINI_MODEL`: `gemini-3.5-flash-lite` (optional, defaults to `gemini-3.5-flash-lite`)
 
 Click **Deploy**!
 
