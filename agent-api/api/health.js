@@ -292,7 +292,7 @@ module.exports = async function handler(req, res) {
         ok: true, version: "1.0.7", testModel: cleanModel,
         result: "Full agent loop completed successfully",
         replyPreview: textReply.slice(0, 300),
-        toolCallExecuted: functionCall.name,
+        toolCallsExecuted: functionCalls.map(f => f.name),
         anotherToolRequested: anotherToolCall?.functionCall?.name || null,
         diagnosticLog,
       });
