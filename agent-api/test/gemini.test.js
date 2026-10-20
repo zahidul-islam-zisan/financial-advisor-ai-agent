@@ -2,7 +2,7 @@ const { describe, it, beforeEach, afterEach } = require("node:test");
 const assert = require("node:assert");
 const {
   runAgent,
-  resolveModelName,
+  getModelName,
   mapStatusToOfflineReason,
   TOOL_DECLARATIONS,
   setGeminiFetcher,
@@ -189,19 +189,20 @@ describe("Gemini Agent API, Diagnostics & Tool Schema Tests", () => {
     assert.strictEqual(result.offlineReason, "timeout");
   });
 
-  it("7. resolveModelName accurately maps nonexistent/deprecated models to active gemini-2.0-flash", () => {
-    assert.strictEqual(resolveModelName("gemini-2.5-flash"), "gemini-2.0-flash");
-    assert.strictEqual(resolveModelName("gemini-1.5-flash"), "gemini-2.0-flash");
-    assert.strictEqual(resolveModelName("gemini-2.5-flash-lite"), "gemini-2.0-flash-lite");
-    assert.strictEqual(resolveModelName("models/gemini-2.0-flash"), "gemini-2.0-flash");
-    assert.strictEqual(resolveModelName(""), "gemini-2.0-flash");
-    assert.strictEqual(resolveModelName(undefined), "gemini-2.0-flash");
-    assert.strictEqual(resolveModelName("custom-gemini-pro"), "custom-gemini-pro");
+  it("7. getModelName uses GEMINI_MODEL exactly, trimming whitespace and stripping leading 'models/', defaulting to gemini-2.5-flash", () => {
+    assert.strictEqual(getModelName("gemini-2.5-flash"), "gemini-2.5-flash");
+    assert.strictEqual(getModelName("  gemini-2.5-flash  "), "gemini-2.5-flash");
+    assert.strictEqual(getModelName("models/gemini-2.5-flash"), "gemini-2.5-flash");
+    assert.strictEqual(getModelName("models/my-custom-model"), "my-custom-model");
+    assert.strictEqual(getModelName("my-custom-model"), "my-custom-model");
+    assert.strictEqual(getModelName(""), "gemini-2.5-flash");
+    assert.strictEqual(getModelName(undefined), "gemini-2.5-flash");
+    assert.strictEqual(getModelName("   "), "gemini-2.5-flash");
   });
 
-  it("8. When model returns 404, agent automatically retries with gemini-2.0-flash and succeeds", async () => {
+  it("8. On 404, agent retries configured fallback model (gemini-2.5-flash-lite) once and succeeds", async () => {
     process.env.GEMINI_API_KEY = "valid-key";
-    process.env.GEMINI_MODEL = "nonexistent-model";
+    delete process.env.GEMINI_MODEL; // defaults to gemini-2.5-flash
 
     let attempt = 0;
     const requestedUrls = [];
@@ -223,7 +224,7 @@ describe("Gemini Agent API, Diagnostics & Tool Schema Tests", () => {
           candidates: [
             {
               content: {
-                parts: [{ text: "Analysis generated after fallback to gemini-2.0-flash." }],
+                parts: [{ text: "Analysis generated after fallback to gemini-2.5-flash-lite." }],
               },
             },
           ],
@@ -239,9 +240,35 @@ describe("Gemini Agent API, Diagnostics & Tool Schema Tests", () => {
     });
 
     assert.strictEqual(result.isOffline, false);
-    assert.ok(result.reply.includes("Analysis generated"));
+    assert.ok(result.reply.includes("Analysis generated after fallback"));
     assert.strictEqual(attempt, 2);
-    assert.ok(requestedUrls[0].includes("nonexistent-model"));
-    assert.ok(requestedUrls[1].includes("gemini-2.0-flash"));
+    assert.ok(requestedUrls[0].includes("gemini-2.5-flash"));
+    assert.ok(requestedUrls[1].includes("gemini-2.5-flash-lite"));
+  });
+
+  it("9. On 404 when fallback model also fails, returns offline fallback with offlineReason 'http_404'", async () => {
+    process.env.GEMINI_API_KEY = "valid-key";
+    delete process.env.GEMINI_MODEL;
+
+    let attempt = 0;
+    setGeminiFetcher(async () => {
+      attempt++;
+      return {
+        ok: false,
+        status: 404,
+        text: async () => JSON.stringify({ error: { code: 404, status: "NOT_FOUND", message: "Model not found" } }),
+      };
+    });
+
+    const result = await runAgent({
+      client: dummyClient,
+      uid: "user_123",
+      docId: "user@example.com_user_123",
+      message: "Check my spending",
+    });
+
+    assert.strictEqual(result.isOffline, true);
+    assert.strictEqual(result.offlineReason, "http_404");
+    assert.strictEqual(attempt, 2); // 1st try: primary model, 2nd try: fallback model
   });
 });

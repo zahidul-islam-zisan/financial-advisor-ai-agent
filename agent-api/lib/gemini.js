@@ -126,20 +126,14 @@ function setGeminiFetcher(fetcher) {
 }
 
 /**
- * Resolves and sanitizes model name, mapping deprecated/placeholder identifiers to active models
+ * Extracts model name from env, trimming whitespace and stripping a leading "models/" only.
+ * Defaults to "gemini-2.5-flash".
  */
-function resolveModelName(envModel) {
-  if (!envModel) return "gemini-2.0-flash";
+function getModelName(envModel) {
+  if (!envModel || typeof envModel !== "string") return "gemini-2.5-flash";
   const trimmed = envModel.trim();
-  const clean = trimmed.startsWith("models/") ? trimmed.slice(7) : trimmed;
-  // Automatically sanitize deprecated or nonexistent model placeholders
-  if (clean === "gemini-2.5-flash" || clean === "gemini-1.5-flash") {
-    return "gemini-2.0-flash";
-  }
-  if (clean === "gemini-2.5-flash-lite" || clean === "gemini-1.5-flash-8b") {
-    return "gemini-2.0-flash-lite";
-  }
-  return clean || "gemini-2.0-flash";
+  if (!trimmed) return "gemini-2.5-flash";
+  return trimmed.startsWith("models/") ? trimmed.slice(7) : trimmed;
 }
 
 /**
@@ -271,8 +265,8 @@ async function runAgent({ client, uid, docId, message, history = [] }) {
     });
   }
 
-  let primaryModel = resolveModelName(process.env.GEMINI_MODEL);
-  const fallbackModel = "gemini-2.0-flash-lite";
+  let primaryModel = getModelName(process.env.GEMINI_MODEL);
+  const fallbackModel = "gemini-2.5-flash-lite";
 
   // 1. Build sanitized contents array with PII masking
   const contents = [];
@@ -330,10 +324,10 @@ async function runAgent({ client, uid, docId, message, history = [] }) {
       });
     }
 
-    // Handle 404 Model Not Found: Retry once with gemini-2.0-flash if currentModel was something else
-    if (response.status === 404 && currentModel !== "gemini-2.0-flash") {
-      console.warn(`[Gemini Model 404] Model ${currentModel} returned 404. Retrying with gemini-2.0-flash...`);
-      currentModel = "gemini-2.0-flash";
+    // Handle 404 Model Not Found: Try configured fallback model once
+    if (response.status === 404 && currentModel !== fallbackModel) {
+      console.warn(`[Gemini Model 404] Model ${currentModel} returned 404. Retrying with fallback model ${fallbackModel}...`);
+      currentModel = fallbackModel;
       continue;
     }
 
@@ -523,7 +517,7 @@ async function runAgent({ client, uid, docId, message, history = [] }) {
 module.exports = {
   SYSTEM_INSTRUCTION,
   TOOL_DECLARATIONS,
-  resolveModelName,
+  getModelName,
   mapStatusToOfflineReason,
   runAgent,
   generateDeterministicFallback,
