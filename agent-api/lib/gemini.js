@@ -63,7 +63,15 @@ const TOOL_DECLARATIONS = [
       {
         name: "detect_recurring_bills",
         description: "Analyzes historical expenses to detect recurring subscription and utility bills, their typical payment dates, and trends.",
-        parameters: { type: "OBJECT", properties: {} },
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            minMonths: {
+              type: "INTEGER",
+              description: "Minimum number of distinct months for recurring charges (default: 2).",
+            },
+          },
+        },
       },
       {
         name: "analyze_bill",
@@ -79,17 +87,41 @@ const TOOL_DECLARATIONS = [
       {
         name: "forecast_next_month",
         description: "Computes a 3-month moving average to project next month's estimated expenses per category.",
-        parameters: { type: "OBJECT", properties: {} },
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            category: {
+              type: "STRING",
+              description: "Optional expense category name to forecast, or leave blank for all categories.",
+            },
+          },
+        },
       },
       {
         name: "propose_budget",
         description: "Analyzes 3-month income and expenses against the 50/30/20 rule to propose category budget caps (does NOT save to database).",
-        parameters: { type: "OBJECT", properties: {} },
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            targetSavingsRate: {
+              type: "NUMBER",
+              description: "Target monthly savings rate percentage (e.g. 20 for standard 50/30/20 rule).",
+            },
+          },
+        },
       },
       {
         name: "get_budget_status",
         description: "Evaluates current month spending against established budgets and returns status and overspending alerts.",
-        parameters: { type: "OBJECT", properties: {} },
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            month: {
+              type: "STRING",
+              description: "Target month in YYYY-MM format, or leave blank for current month.",
+            },
+          },
+        },
       },
       {
         name: "create_budget",
