@@ -3,12 +3,14 @@ import 'dart:developer';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../app/route/app_routes.dart';
 import '../../../../core/constants/app_colors.dart';
+import '../../../../core/services/demo_data_service.dart';
 import '../../../../core/widgets/custom_snackbar.dart';
 
 class MenuPage extends StatefulWidget {
@@ -21,6 +23,9 @@ class MenuPage extends StatefulWidget {
 class _MenuPageState extends State<MenuPage> {
   late String email;
   String? videoUrl;
+  final DemoDataService _demoDataService = DemoDataService();
+  bool _isLoadingDemoData = false;
+  bool _isRemovingDemoData = false;
 
   @override
   void initState() {
@@ -85,6 +90,122 @@ class _MenuPageState extends State<MenuPage> {
         );
       },
     );
+  }
+
+  void _confirmLoadDemoData() {
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: const Color.fromARGB(255, 9, 28, 60),
+          title: const Text('Load Demo Data', style: TextStyle(color: Colors.white)),
+          content: const Text(
+            'This will generate 70 realistic transactions (Aug-Oct 2026) for testing. Existing real transactions are preserved.',
+            style: TextStyle(color: Colors.white70),
+          ),
+          actions: [
+            TextButton(
+              child: const Text('Cancel'),
+              onPressed: () => Navigator.of(dialogContext).pop(),
+            ),
+            TextButton(
+              child: const Text(
+                'Load',
+                style: TextStyle(
+                  color: Colors.amber,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              onPressed: () {
+                Navigator.of(dialogContext).pop();
+                _executeLoadDemoData();
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _executeLoadDemoData() async {
+    if (_isLoadingDemoData || _isRemovingDemoData) return;
+    setState(() => _isLoadingDemoData = true);
+    try {
+      final count = await _demoDataService.loadDemoData();
+      if (!mounted) return;
+      CustomSnackbar.showSuccess(
+        context: context,
+        message: 'Loaded $count demo transactions successfully.',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      CustomSnackbar.showError(
+        context: context,
+        message: 'Failed to load demo data: $e',
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isLoadingDemoData = false);
+      }
+    }
+  }
+
+  void _confirmRemoveDemoData() {
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: const Color.fromARGB(255, 9, 28, 60),
+          title: const Text('Remove Demo Data', style: TextStyle(color: Colors.white)),
+          content: const Text(
+            'This will delete only transactions marked as demo data (is_demo == true). Your real transactions will not be touched.',
+            style: TextStyle(color: Colors.white70),
+          ),
+          actions: [
+            TextButton(
+              child: const Text('Cancel'),
+              onPressed: () => Navigator.of(dialogContext).pop(),
+            ),
+            TextButton(
+              child: const Text(
+                'Remove',
+                style: TextStyle(
+                  color: Colors.redAccent,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              onPressed: () {
+                Navigator.of(dialogContext).pop();
+                _executeRemoveDemoData();
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _executeRemoveDemoData() async {
+    if (_isLoadingDemoData || _isRemovingDemoData) return;
+    setState(() => _isRemovingDemoData = true);
+    try {
+      final count = await _demoDataService.removeDemoData();
+      if (!mounted) return;
+      CustomSnackbar.showSuccess(
+        context: context,
+        message: 'Removed $count demo transactions.',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      CustomSnackbar.showError(
+        context: context,
+        message: 'Failed to remove demo data: $e',
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isRemovingDemoData = false);
+      }
+    }
   }
 
   @override
@@ -246,6 +367,28 @@ class _MenuPageState extends State<MenuPage> {
               );
             },
           ),
+          if (kDebugMode) ...[
+            const SizedBox(height: 12),
+            _buildMenuItem(
+              icon: Icons.data_array,
+              iconColor: Colors.amber,
+              title: _isLoadingDemoData ? 'Loading demo data...' : 'Load demo data',
+              onTap: _isLoadingDemoData || _isRemovingDemoData
+                  ? () {}
+                  : _confirmLoadDemoData,
+            ),
+            const SizedBox(height: 12),
+            _buildMenuItem(
+              icon: Icons.cleaning_services,
+              iconColor: Colors.orangeAccent,
+              title: _isRemovingDemoData
+                  ? 'Removing demo data...'
+                  : 'Remove demo data',
+              onTap: _isLoadingDemoData || _isRemovingDemoData
+                  ? () {}
+                  : _confirmRemoveDemoData,
+            ),
+          ],
           const SizedBox(height: 24),
           // const SizedBox(height: 12),
           // _buildMenuItem(
