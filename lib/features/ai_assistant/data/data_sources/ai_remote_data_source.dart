@@ -1,5 +1,6 @@
 import 'dart:developer';
 import 'package:dartz/dartz.dart';
+import 'package:flutter/foundation.dart';
 
 import '../../../../core/error/failure.dart';
 import '../../../../core/services/agent_service.dart';
@@ -66,6 +67,12 @@ class AiRemoteDataSource {
 
     return result.fold(
       (failure) async {
+        if (kDebugMode) {
+          debugPrint(
+            '[AiRemoteDataSource] AgentService request failed: "${failure.message}".\n'
+            '  -> Triggering local offline rule engine fallback.',
+          );
+        }
         log("AgentService request failed: ${failure.message}. Falling back to offline rule engine.");
 
         // If the error indicates authentication failure, return it directly so the user can log in
@@ -84,7 +91,18 @@ class AiRemoteDataSource {
       (data) {
         final reply = data['reply'] as String? ?? '';
         final isOffline = data['isOffline'] == true;
+        final offlineReason = data['offlineReason'] as String?;
         final pendingActionJson = data['pendingAction'] as Map<String, dynamic>?;
+
+        if (kDebugMode) {
+          debugPrint('[AiRemoteDataSource] AgentService succeeded. isOffline from server: $isOffline');
+          if (isOffline) {
+            debugPrint(
+              '[AiRemoteDataSource] Server returned isOffline: true (offlineReason: $offlineReason). '
+              'The Vercel serverless agent ran its internal deterministic rule engine.',
+            );
+          }
+        }
 
         PendingFinancialActionModel? pendingAction;
         if (pendingActionJson != null && pendingActionJson['id'] != null) {

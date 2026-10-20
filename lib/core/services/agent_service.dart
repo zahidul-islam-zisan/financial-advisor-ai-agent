@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:dartz/dartz.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../constants/agent_config.dart';
@@ -44,11 +45,22 @@ class AgentService {
   ) async {
     String? token = await _getIdToken();
     if (token == null) {
+      if (kDebugMode) {
+        debugPrint('[AgentService] No Firebase ID token available (user not logged in or null token).');
+      }
       return Left(Failure("Please log in again"));
     }
 
-    final url = Uri.parse('$_baseUrl$endpoint');
+    final cleanBaseUrl = _baseUrl.endsWith('/')
+        ? _baseUrl.substring(0, _baseUrl.length - 1)
+        : _baseUrl;
+    final cleanEndpoint = endpoint.startsWith('/') ? endpoint : '/$endpoint';
+    final url = Uri.parse('$cleanBaseUrl$cleanEndpoint');
     final jsonPayload = jsonEncode(body);
+
+    if (kDebugMode) {
+      debugPrint('[AgentService] Request URL: $url');
+    }
 
     http.Response response;
     try {
@@ -63,10 +75,24 @@ class AgentService {
           )
           .timeout(const Duration(seconds: 45));
 
+      if (kDebugMode) {
+        final preview = response.body.length > 300
+            ? response.body.substring(0, 300)
+            : response.body;
+        debugPrint('[AgentService] HTTP Status Code: ${response.statusCode}');
+        debugPrint('[AgentService] Response Body (first 300 chars): $preview');
+      }
+
       // Force refresh token once on 401 and retry
       if (response.statusCode == 401) {
+        if (kDebugMode) {
+          debugPrint('[AgentService] 401 Unauthorized received. Attempting token force-refresh & retry...');
+        }
         final refreshedToken = await _getIdToken(forceRefresh: true);
         if (refreshedToken == null) {
+          if (kDebugMode) {
+            debugPrint('[AgentService] Token refresh returned null.');
+          }
           return Left(Failure("Please log in again"));
         }
 
@@ -80,14 +106,34 @@ class AgentService {
               body: jsonPayload,
             )
             .timeout(const Duration(seconds: 45));
+
+        if (kDebugMode) {
+          final preview = response.body.length > 300
+              ? response.body.substring(0, 300)
+              : response.body;
+          debugPrint('[AgentService] Retry HTTP Status Code: ${response.statusCode}');
+          debugPrint('[AgentService] Retry Response Body (first 300 chars): $preview');
+        }
       }
-    } on TimeoutException {
+    } on TimeoutException catch (e) {
+      if (kDebugMode) {
+        debugPrint('[AgentService] Caught TimeoutException: ${e.message}');
+      }
       return Left(Failure("Request timed out. Please check your internet connection."));
-    } on SocketException {
+    } on SocketException catch (e) {
+      if (kDebugMode) {
+        debugPrint('[AgentService] Caught SocketException: ${e.message} (osError: ${e.osError})');
+      }
       return Left(Failure("Network error. Please check your internet connection."));
-    } on http.ClientException {
+    } on http.ClientException catch (e) {
+      if (kDebugMode) {
+        debugPrint('[AgentService] Caught http.ClientException: ${e.message}');
+      }
       return Left(Failure("Network error. Please check your internet connection."));
     } catch (e) {
+      if (kDebugMode) {
+        debugPrint('[AgentService] Caught Exception (${e.runtimeType}): $e');
+      }
       return Left(Failure("Unable to connect to financial agent: ${e.toString()}"));
     }
 

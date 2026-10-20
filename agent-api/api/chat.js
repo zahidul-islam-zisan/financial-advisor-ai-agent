@@ -70,6 +70,7 @@ module.exports = async function handler(req, res) {
       toolCalls: agentResult.toolCalls || [],
       pendingAction: agentResult.pendingAction || null,
       isOffline: !!agentResult.isOffline,
+      offlineReason: agentResult.offlineReason || null,
     });
   } catch (err) {
     console.error("Chat handler execution error:", err.message);

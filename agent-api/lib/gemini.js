@@ -21,10 +21,10 @@ Core Operating Principles:
 6. Always end financial advice with this exact disclaimer sentence:
 "This is a suggestion, not professional financial advice."`;
 
-// Function declarations for Gemini API
+// Function declarations for Gemini API (tools: [{ functionDeclarations: [...] }])
 const TOOL_DECLARATIONS = [
   {
-    function_declarations: [
+    functionDeclarations: [
       {
         name: "get_summary",
         description: "Calculates total income, total expenses, net savings, savings rate, and category spending breakdown for a specific month.",
@@ -120,20 +120,46 @@ const TOOL_DECLARATIONS = [
   },
 ];
 
+let _customFetcher = null;
+function setGeminiFetcher(fetcher) {
+  _customFetcher = fetcher;
+}
+
+/**
+ * Maps HTTP status codes to non-sensitive offlineReason identifiers
+ */
+function mapStatusToOfflineReason(status) {
+  if (status === 400) return "http_400";
+  if (status === 401) return "http_401";
+  if (status === 403) return "http_403";
+  if (status === 404) return "http_404";
+  if (status === 429) return "http_429";
+  if (status >= 500 && status < 600) return "http_5xx";
+  return "other";
+}
+
+/**
+ * Invokes Gemini REST API via POST with key in x-goog-api-key header (never in URL)
+ */
 async function callGeminiApi({ model, apiKey, systemInstruction, contents, tools }) {
-  const url = `${GEMINI_API_URL}/${model}:generateContent?key=${apiKey}`;
-  const response = await fetch(url, {
+  const url = `${GEMINI_API_URL}/${model}:generateContent`;
+  const fetcher = _customFetcher || globalThis.fetch;
+  const response = await fetcher(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": apiKey,
+    },
     body: JSON.stringify({
       contents,
-      system_instruction: { parts: [{ text: systemInstruction }] },
+      systemInstruction: { parts: [{ text: systemInstruction }] },
       tools,
-      generation_config: {
+      generationConfig: {
         temperature: 0.2,
-        max_output_tokens: 1024,
+        maxOutputTokens: 1024,
       },
     }),
+    signal: AbortSignal.timeout(25000),
   });
 
   return response;
@@ -143,7 +169,7 @@ async function callGeminiApi({ model, apiKey, systemInstruction, contents, tools
  * Deterministic Offline Rule Engine Fallback
  * Used when Gemini API key is missing or when the API is unreachable.
  */
-async function generateDeterministicFallback({ client, uid, docId, message }) {
+async function generateDeterministicFallback({ client, uid, docId, message, offlineReason = "other" }) {
   const lower = message.toLowerCase();
   const toolCalls = [];
   let reply = "";
@@ -204,6 +230,7 @@ async function generateDeterministicFallback({ client, uid, docId, message }) {
     toolCalls,
     pendingAction: null,
     isOffline: true,
+    offlineReason,
   };
 }
 
@@ -211,14 +238,23 @@ async function generateDeterministicFallback({ client, uid, docId, message }) {
  * Main Agent Execution Loop
  */
 async function runAgent({ client, uid, docId, message, history = [] }) {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = (process.env.GEMINI_API_KEY || "").trim();
+  const geminiConfigured = Boolean(apiKey && apiKey !== "YOUR_GEMINI_API_KEY_HERE");
+
+  // If no Gemini API key configured, log once and use deterministic rule engine
+  if (!geminiConfigured) {
+    console.error("GEMINI_API_KEY missing");
+    return generateDeterministicFallback({
+      client,
+      uid,
+      docId,
+      message,
+      offlineReason: "missing_key",
+    });
+  }
+
   let primaryModel = process.env.GEMINI_MODEL || "gemini-2.5-flash";
   const fallbackModel = "gemini-2.5-flash-lite";
-
-  // If no Gemini API key configured, use deterministic rule engine
-  if (!apiKey || apiKey === "YOUR_GEMINI_API_KEY_HERE") {
-    return generateDeterministicFallback({ client, uid, docId, message });
-  }
 
   // 1. Build sanitized contents array with PII masking
   const contents = [];
@@ -258,27 +294,83 @@ async function runAgent({ client, uid, docId, message, history = [] }) {
         tools: TOOL_DECLARATIONS,
       });
     } catch (netErr) {
-      console.error("Gemini network error, attempting offline fallback:", netErr.message);
-      return generateDeterministicFallback({ client, uid, docId, message });
+      const isTimeout =
+        netErr.name === "AbortError" ||
+        netErr.name === "TimeoutError" ||
+        (netErr.message && netErr.message.toLowerCase().includes("timeout"));
+      const offlineReason = isTimeout ? "timeout" : "other";
+
+      console.error(
+        `[Gemini Network Error] Type: ${netErr.name || "Error"}, Message: ${(netErr.message || "").slice(0, 200)}, Model: ${currentModel}`
+      );
+      return generateDeterministicFallback({
+        client,
+        uid,
+        docId,
+        message,
+        offlineReason,
+      });
     }
 
-    // Handle 429 Rate Limit or 503 Overloaded: Retry once with lite model
+    // Handle 429 Rate Limit or 503 Overloaded: Retry once with lite model if not already using it
     if ((response.status === 429 || response.status === 503) && currentModel !== fallbackModel) {
-      console.warn(`Gemini returned HTTP ${response.status} on ${currentModel}. Retrying with ${fallbackModel}...`);
+      console.warn(`[Gemini RateLimit/Overload] HTTP ${response.status} on ${currentModel}. Retrying with ${fallbackModel}...`);
       currentModel = fallbackModel;
       continue;
     }
 
     if (!response.ok) {
-      const errBody = await response.text();
-      console.error(`Gemini API error (${response.status}):`, errBody);
-      return generateDeterministicFallback({ client, uid, docId, message });
+      let errStatus = "";
+      let errMessage = "";
+      try {
+        const errBody = await response.text();
+        try {
+          const errJson = JSON.parse(errBody);
+          if (errJson && errJson.error) {
+            errStatus = errJson.error.status || "";
+            errMessage = errJson.error.message || "";
+          } else {
+            errMessage = errBody;
+          }
+        } catch (_) {
+          errMessage = errBody;
+        }
+      } catch (_) {
+        errMessage = "Failed to read response body";
+      }
+
+      if (errMessage && errMessage.length > 200) {
+        errMessage = errMessage.slice(0, 200) + "...";
+      }
+
+      console.error(
+        `[Gemini Error] HTTP Status: ${response.status}, Error Status: ${errStatus || "N/A"}, Error Message: ${errMessage || "N/A"}, Model: ${currentModel}`
+      );
+
+      const offlineReason = mapStatusToOfflineReason(response.status);
+      return generateDeterministicFallback({
+        client,
+        uid,
+        docId,
+        message,
+        offlineReason,
+      });
     }
 
     const data = await response.json();
     const candidate = data.candidates && data.candidates[0];
     if (!candidate || !candidate.content) {
-      return generateDeterministicFallback({ client, uid, docId, message });
+      const finishReason = candidate ? candidate.finishReason : "NO_CANDIDATE";
+      console.error(
+        `[Gemini Error] Empty candidate or content from Gemini. FinishReason: ${finishReason}, Model: ${currentModel}`
+      );
+      return generateDeterministicFallback({
+        client,
+        uid,
+        docId,
+        message,
+        offlineReason: "other",
+      });
     }
 
     const parts = candidate.content.parts || [];
@@ -304,6 +396,8 @@ async function runAgent({ client, uid, docId, message, history = [] }) {
         reply: finalReply,
         toolCalls: executedToolCalls,
         pendingAction,
+        isOffline: false,
+        offlineReason: null,
       };
     }
 
@@ -364,6 +458,8 @@ async function runAgent({ client, uid, docId, message, history = [] }) {
         reply: proposalText,
         toolCalls: executedToolCalls,
         pendingAction,
+        isOffline: false,
+        offlineReason: null,
       };
     }
 
@@ -379,7 +475,10 @@ async function runAgent({ client, uid, docId, message, history = [] }) {
         {
           functionResponse: {
             name: toolName,
-            response: { content: toolResult },
+            response: {
+              name: toolName,
+              content: toolResult,
+            },
           },
         },
       ],
@@ -387,12 +486,20 @@ async function runAgent({ client, uid, docId, message, history = [] }) {
   }
 
   // Fallback if loop exceeded max iterations
-  return generateDeterministicFallback({ client, uid, docId, message });
+  return generateDeterministicFallback({
+    client,
+    uid,
+    docId,
+    message,
+    offlineReason: "other",
+  });
 }
 
 module.exports = {
   SYSTEM_INSTRUCTION,
   TOOL_DECLARATIONS,
+  mapStatusToOfflineReason,
   runAgent,
   generateDeterministicFallback,
+  setGeminiFetcher,
 };
