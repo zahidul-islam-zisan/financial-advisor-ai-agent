@@ -189,20 +189,20 @@ describe("Gemini Agent API, Diagnostics & Tool Schema Tests", () => {
     assert.strictEqual(result.offlineReason, "timeout");
   });
 
-  it("7. getModelName uses GEMINI_MODEL exactly, trimming whitespace and stripping leading 'models/', defaulting to gemini-2.5-flash", () => {
-    assert.strictEqual(getModelName("gemini-2.5-flash"), "gemini-2.5-flash");
-    assert.strictEqual(getModelName("  gemini-2.5-flash  "), "gemini-2.5-flash");
-    assert.strictEqual(getModelName("models/gemini-2.5-flash"), "gemini-2.5-flash");
+  it("7. getModelName uses GEMINI_MODEL exactly, trimming whitespace and stripping leading 'models/', defaulting to gemini-3.5-flash", () => {
+    assert.strictEqual(getModelName("gemini-3.5-flash"), "gemini-3.5-flash");
+    assert.strictEqual(getModelName("  gemini-3.5-flash  "), "gemini-3.5-flash");
+    assert.strictEqual(getModelName("models/gemini-3.5-flash"), "gemini-3.5-flash");
     assert.strictEqual(getModelName("models/my-custom-model"), "my-custom-model");
     assert.strictEqual(getModelName("my-custom-model"), "my-custom-model");
-    assert.strictEqual(getModelName(""), "gemini-2.5-flash");
-    assert.strictEqual(getModelName(undefined), "gemini-2.5-flash");
-    assert.strictEqual(getModelName("   "), "gemini-2.5-flash");
+    assert.strictEqual(getModelName(""), "gemini-3.5-flash");
+    assert.strictEqual(getModelName(undefined), "gemini-3.5-flash");
+    assert.strictEqual(getModelName("   "), "gemini-3.5-flash");
   });
 
-  it("8. On 404, agent retries configured fallback model (gemini-2.5-flash-lite) once and succeeds", async () => {
+  it("8. On 404, agent retries configured fallback model (gemini-3.5-flash-lite) once and succeeds", async () => {
     process.env.GEMINI_API_KEY = "valid-key";
-    delete process.env.GEMINI_MODEL; // defaults to gemini-2.5-flash
+    delete process.env.GEMINI_MODEL; // defaults to gemini-3.5-flash
 
     let attempt = 0;
     const requestedUrls = [];
@@ -224,7 +224,7 @@ describe("Gemini Agent API, Diagnostics & Tool Schema Tests", () => {
           candidates: [
             {
               content: {
-                parts: [{ text: "Analysis generated after fallback to gemini-2.5-flash-lite." }],
+                parts: [{ text: "Analysis generated after fallback to gemini-3.5-flash-lite." }],
               },
             },
           ],
@@ -242,8 +242,8 @@ describe("Gemini Agent API, Diagnostics & Tool Schema Tests", () => {
     assert.strictEqual(result.isOffline, false);
     assert.ok(result.reply.includes("Analysis generated after fallback"));
     assert.strictEqual(attempt, 2);
-    assert.ok(requestedUrls[0].includes("gemini-2.5-flash"));
-    assert.ok(requestedUrls[1].includes("gemini-2.5-flash-lite"));
+    assert.ok(requestedUrls[0].includes("gemini-3.5-flash"));
+    assert.ok(requestedUrls[1].includes("gemini-3.5-flash-lite"));
   });
 
   it("9. On 404 when fallback model also fails, returns offline fallback with offlineReason 'http_404'", async () => {
@@ -270,5 +270,81 @@ describe("Gemini Agent API, Diagnostics & Tool Schema Tests", () => {
     assert.strictEqual(result.isOffline, true);
     assert.strictEqual(result.offlineReason, "http_404");
     assert.strictEqual(attempt, 2); // 1st try: primary model, 2nd try: fallback model
+  });
+
+  it("10. Multi-turn tool execution sends functionResponse with role: 'user' (not 'function')", async () => {
+    process.env.GEMINI_API_KEY = "valid-key";
+
+    let secondRequestBody = null;
+    let turn = 0;
+
+    setGeminiFetcher(async (url, options) => {
+      turn++;
+      if (turn === 1) {
+        // Return a tool call to get_summary
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      functionCall: {
+                        name: "get_summary",
+                        args: { month: "2026-10" },
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+        };
+      }
+
+      // Turn 2: capture the body sent back to Gemini
+      secondRequestBody = JSON.parse(options.body);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          candidates: [
+            {
+              content: {
+                parts: [{ text: "You spent ৳5000 this month." }],
+              },
+            },
+          ],
+        }),
+      };
+    });
+
+    const result = await runAgent({
+      client: dummyClient,
+      uid: "user_123",
+      docId: "user@example.com_user_123",
+      message: "How am I spending this month?",
+    });
+
+    assert.strictEqual(result.isOffline, false);
+    assert.ok(result.reply.includes("You spent ৳5000"));
+    assert.ok(secondRequestBody, "Must execute turn 2");
+
+    // Verify turn 2 contents
+    const contents = secondRequestBody.contents;
+    const modelCallTurn = contents.find((c) => c.role === "model");
+    const funcResponseTurn = contents.find(
+      (c) => c.parts && c.parts[0] && c.parts[0].functionResponse
+    );
+
+    assert.ok(modelCallTurn, "Model turn with functionCall must be present");
+    assert.ok(funcResponseTurn, "Function response turn must be present");
+    assert.strictEqual(
+      funcResponseTurn.role,
+      "user",
+      "Function response turn MUST have role 'user', NOT 'function'"
+    );
   });
 });

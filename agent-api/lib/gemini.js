@@ -127,12 +127,12 @@ function setGeminiFetcher(fetcher) {
 
 /**
  * Extracts model name from env, trimming whitespace and stripping a leading "models/" only.
- * Defaults to "gemini-2.5-flash".
+ * Defaults to "gemini-3.5-flash".
  */
 function getModelName(envModel) {
-  if (!envModel || typeof envModel !== "string") return "gemini-2.5-flash";
+  if (!envModel || typeof envModel !== "string") return "gemini-3.5-flash";
   const trimmed = envModel.trim();
-  if (!trimmed) return "gemini-2.5-flash";
+  if (!trimmed) return "gemini-3.5-flash";
   return trimmed.startsWith("models/") ? trimmed.slice(7) : trimmed;
 }
 
@@ -266,7 +266,7 @@ async function runAgent({ client, uid, docId, message, history = [] }) {
   }
 
   let primaryModel = getModelName(process.env.GEMINI_MODEL);
-  const fallbackModel = "gemini-2.5-flash-lite";
+  const fallbackModel = "gemini-3.5-flash-lite";
 
   // 1. Build sanitized contents array with PII masking
   const contents = [];
@@ -489,7 +489,7 @@ async function runAgent({ client, uid, docId, message, history = [] }) {
     });
 
     contents.push({
-      role: "function",
+      role: "user",
       parts: [
         {
           functionResponse: {
