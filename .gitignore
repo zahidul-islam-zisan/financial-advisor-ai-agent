@@ -51,6 +51,7 @@ lib/firebase_options.dart
 service-account*.json
 *firebase-adminsdk*.json
 .env*
+!.env.example
 
 # Keystores & Signing
 key/

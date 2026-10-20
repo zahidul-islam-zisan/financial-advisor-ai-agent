@@ -1,0 +1,16 @@
+{
+  "name": "pulse-expense-agent-api",
+  "version": "1.0.0",
+  "description": "Vercel Serverless AI Financial Assistant for Pulse Expense",
+  "main": "api/health.js",
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.0.0"
+  },
+  "private": true
+}

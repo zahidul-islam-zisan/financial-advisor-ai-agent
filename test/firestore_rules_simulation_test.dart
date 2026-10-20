@@ -63,32 +63,42 @@ class FirestoreSecurityRuleSimulator {
     return true;
   }
 
-  // Evaluates pending action update rule: status in ['PENDING', 'CONFIRMED', 'REJECTED', 'EXPIRED']
-  static bool evaluatePendingActionUpdate({
-    required Map<String, dynamic>? auth,
-    required String userDocId,
-    required Map<String, dynamic> data,
-  }) {
-    if (!isOwner(auth: auth, userDocId: userDocId)) return false;
-    final status = data['status'];
-    const validStatuses = ['PENDING', 'CONFIRMED', 'REJECTED', 'EXPIRED'];
-    if (status == null || !validStatuses.contains(status)) return false;
-    return true;
-  }
-
-  // Evaluates audit log rules: allow create: if isOwner; allow update, delete: if false;
-  static bool evaluateAuditLogCreate({
+  // Evaluates pending action rules: allow read: if isOwner; allow write: if false;
+  static bool evaluatePendingActionRead({
     required Map<String, dynamic>? auth,
     required String userDocId,
   }) {
     return isOwner(auth: auth, userDocId: userDocId);
   }
 
-  static bool evaluateAuditLogUpdateOrDelete({
+  static bool evaluatePendingActionWrite({
     required Map<String, dynamic>? auth,
     required String userDocId,
   }) {
-    // Strictly disallowed by firestore.rules line 78: allow update, delete: if false;
+    // Strictly disallowed for client SDK (created/updated exclusively by serverless agent)
+    return false;
+  }
+
+  // Evaluates audit log rules: allow read: if isOwner; allow write: if false;
+  static bool evaluateAuditLogRead({
+    required Map<String, dynamic>? auth,
+    required String userDocId,
+  }) {
+    return isOwner(auth: auth, userDocId: userDocId);
+  }
+
+  static bool evaluateAuditLogWrite({
+    required Map<String, dynamic>? auth,
+    required String userDocId,
+  }) {
+    // Strictly disallowed for client SDK (written exclusively by server Admin SDK)
+    return false;
+  }
+
+  // Evaluates rate_limits rules: allow read, write: if false;
+  static bool evaluateRateLimitsAccess({
+    required Map<String, dynamic>? auth,
+  }) {
     return false;
   }
 
@@ -232,56 +242,66 @@ void main() {
       );
     });
 
-    test('Rule 5: Pending Action State Machine Enforcement', () {
-      // Valid transitions
-      for (final validStatus in ['PENDING', 'CONFIRMED', 'REJECTED', 'EXPIRED']) {
-        expect(
-          FirestoreSecurityRuleSimulator.evaluatePendingActionUpdate(
-            auth: aliceAuth,
-            userDocId: aliceDocId,
-            data: {'status': validStatus},
-          ),
-          isTrue,
-        );
-      }
-
-      // Invalid arbitrary status -> DENIED
+    test('Rule 5: Pending Actions Client Access Control (Read-Only for Client, Server-Managed)', () {
+      // Owner can read pending actions -> ALLOWED
       expect(
-        FirestoreSecurityRuleSimulator.evaluatePendingActionUpdate(
-          auth: aliceAuth,
-          userDocId: aliceDocId,
-          data: {'status': 'BYPASS_SECURITY'},
-        ),
-        isFalse,
-      );
-    });
-
-    test('Rule 6: Audit Log Append-Only Integrity (Updates and Deletes are Strictly Denied)', () {
-      // Creating an audit record by owner -> ALLOWED
-      expect(
-        FirestoreSecurityRuleSimulator.evaluateAuditLogCreate(
+        FirestoreSecurityRuleSimulator.evaluatePendingActionRead(
           auth: aliceAuth,
           userDocId: aliceDocId,
         ),
         isTrue,
       );
 
-      // Attempting to update/modify an existing audit log -> STRICTLY DENIED
+      // Non-owner cannot read Alice's pending actions -> DENIED
       expect(
-        FirestoreSecurityRuleSimulator.evaluateAuditLogUpdateOrDelete(
+        FirestoreSecurityRuleSimulator.evaluatePendingActionRead(
+          auth: bobAuth,
+          userDocId: aliceDocId,
+        ),
+        isFalse,
+      );
+
+      // Direct client creation/update -> STRICTLY DENIED (managed exclusively by server)
+      expect(
+        FirestoreSecurityRuleSimulator.evaluatePendingActionWrite(
           auth: aliceAuth,
           userDocId: aliceDocId,
         ),
         isFalse,
-        reason: 'Audit logs are immutable against updates to ensure non-repudiation',
+      );
+    });
+
+    test('Rule 6: Audit Logs & Rate Limits Server-Only Enforcement', () {
+      // Owner can read their own audit logs -> ALLOWED
+      expect(
+        FirestoreSecurityRuleSimulator.evaluateAuditLogRead(
+          auth: aliceAuth,
+          userDocId: aliceDocId,
+        ),
+        isTrue,
       );
 
-      // Cross-user creation -> DENIED
+      // Non-owner reading Alice's audit logs -> DENIED
       expect(
-        FirestoreSecurityRuleSimulator.evaluateAuditLogCreate(
+        FirestoreSecurityRuleSimulator.evaluateAuditLogRead(
           auth: bobAuth,
           userDocId: aliceDocId,
         ),
+        isFalse,
+      );
+
+      // Client creating or modifying audit logs -> STRICTLY DENIED (written only by Admin SDK)
+      expect(
+        FirestoreSecurityRuleSimulator.evaluateAuditLogWrite(
+          auth: aliceAuth,
+          userDocId: aliceDocId,
+        ),
+        isFalse,
+      );
+
+      // Rate limits collection direct client access -> STRICTLY DENIED
+      expect(
+        FirestoreSecurityRuleSimulator.evaluateRateLimitsAccess(auth: aliceAuth),
         isFalse,
       );
     });

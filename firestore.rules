@@ -61,22 +61,22 @@ service cloud.firestore {
           && request.resource.data.targetAmount > 0;
       }
 
-      // Pending Confirmation Actions (Phase 3 human confirmation workflow)
+      // Pending Confirmation Actions: Client may read only (server creates/updates via Admin SDK)
       match /pending_actions/{actionId} {
         allow read: if isOwner(userDocId);
-        allow create: if isOwner(userDocId);
-        allow update: if isOwner(userDocId)
-          && request.resource.data.status in ['PENDING', 'CONFIRMED', 'REJECTED', 'EXPIRED'];
-        allow delete: if isOwner(userDocId);
+        allow write: if false;
       }
 
-      // Audit Logs: Append-only, tamper-proof audit trail
+      // Audit Logs: Client may read only; creation and modification are restricted to server Admin SDK
       match /audit_logs/{logId} {
         allow read: if isOwner(userDocId);
-        allow create: if isOwner(userDocId);
-        // Strictly prevent tampering or deletion of existing audit logs
-        allow update, delete: if false;
+        allow write: if false;
       }
+    }
+
+    // Rate Limits: Strictly internal backend collection (managed via Admin SDK)
+    match /rate_limits/{uid} {
+      allow read, write: if false;
     }
 
     // Public / Shared Tutorial Video (Read-only for authenticated users)
