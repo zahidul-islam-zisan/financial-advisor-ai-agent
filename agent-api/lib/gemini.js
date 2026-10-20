@@ -365,10 +365,6 @@ async function runAgent({ client, uid, docId, message, history = [] }) {
 
     let response;
     try {
-      // Debug: log the roles being sent in this iteration
-      const rolesSummary = contents.map(c => c.role).join(" → ");
-      console.log(`[Gemini Loop] Iteration ${iterations}, Model: ${currentModel}, Turns: ${contents.length}, Roles: ${rolesSummary}`);
-      
       response = await callGeminiApi({
         model: currentModel,
         apiKey,
@@ -434,7 +430,7 @@ async function runAgent({ client, uid, docId, message, history = [] }) {
       }
 
       console.error(
-        `[Gemini Error] HTTP Status: ${response.status}, Error Status: ${errStatus || "N/A"}, Error Message: ${errMessage || "N/A"}, Model: ${currentModel}, Iteration: ${iterations}, ContentsTurns: ${contents.length}`
+        `[Gemini Error] HTTP Status: ${response.status}, Error Status: ${errStatus || "N/A"}, Error Message: ${errMessage || "N/A"}, Model: ${currentModel}`
       );
 
       const offlineReason = mapStatusToOfflineReason(response.status);

@@ -1,102 +1,265 @@
-# 📘 ExpensePulse — Technical & Architectural Documentation
+# 📘 ExpensePulse — Technical & System Architecture Documentation
 
-## 1. System Architecture
-ExpensePulse follows a **Feature-First Clean Architecture** with distinct presentation, business logic, and data layers:
-- **Presentation Layer:** Flutter Widgets and BLoC Consumers.
-- **State Management:** BLoC Pattern (`flutter_bloc ^9.1.1`).
-- **Domain/Data Layer:** Repositories and Data Sources utilizing functional error handling (`dartz Either<Failure, T>`).
-- **Backend Services:** Firebase Authentication, Cloud Firestore, and Google Gemini 2.5 Flash (with offline deterministic fallback).
+**FinTechathon 2026 Submission (Topic A: Personal Finance Assistant)**  
+**Version:** 2.0.0 (Production Serverless Agent Architecture)  
+**Date:** October 2026  
 
 ---
 
-## 2. Agent & Tool Execution Flow
+## 1. System Architecture
+
+ExpensePulse implements a **Hybrid Edge-Serverless Architecture** that separates the client application presentation layer from the AI reasoning engine and database operations.
 
 ```mermaid
-sequenceDiagram
-    autonumber
-    actor User as User (Flutter UI)
-    participant BLoC as AiAssistantBloc
-    participant LLM as Gemini 2.5 Flash
-    participant Agent as AgentActionDataSource
-    participant DB as Cloud Firestore
+flowchart TD
+    subgraph Client["Flutter Client Application (Web / Android / iOS)"]
+        UI["Presentation Layer (Flutter UI)"]
+        BLoC["AiAssistantBloc (State Management)"]
+        AS["AgentService (HTTP Client + JWT Auth)"]
+        OfflineEngine["Local Offline Fallback Engine"]
+    end
 
-    User->>BLoC: "Set a budget for Dining: ৳350"
-    BLoC->>LLM: Send prompt + System Prompt + Tools
-    LLM-->>BLoC: FunctionCall: create_budget(category="Dining", limit=350)
-    BLoC->>Agent: proposeBudget("Dining", 350)
-    Agent->>DB: Write pending_actions/{id} (status: PENDING, expires: 15m)
-    Agent-->>BLoC: Returns PendingFinancialActionModel
-    BLoC-->>User: Displays Message + Interactive Confirmation Card
-    
-    Note over User,DB: Phase: Human Authorization
-    User->>BLoC: Taps "Confirm & Save"
-    BLoC->>Agent: confirmPendingAction(actionId)
-    Agent->>DB: Read pending_actions/{id}
-    Note over Agent: Verifies Ownership (caller.uid == action.uid)<br/>Verifies Status (status == PENDING)<br/>Verifies Expiry (now < expiresAt)
-    Agent->>DB: Write budgets/{dining}
-    Agent->>DB: Verify document exists
-    Agent->>DB: Append audit_logs/{logId} (Immutable)
-    Agent->>DB: Update pending_actions/{id} status: CONFIRMED
-    Agent-->>BLoC: Returns execution summary
-    BLoC-->>User: Shows Verified Confirmation & Audit Record
+    subgraph Edge["Vercel Serverless Backend (agent-api/)"]
+        AuthMid["Auth Middleware (jose + Google JWKS)"]
+        RateLimit["In-Memory Rate Limiter (20/min, 200/day)"]
+        AgentLoop["Gemini Agent Execution Loop (gemini-3.5-flash-lite)"]
+        ToolRegistry["Deterministic Tool Engines (Pure JS Math)"]
+        ConfirmEngine["2-Step Confirmation & Anti-Replay State Machine"]
+    end
+
+    subgraph Cloud["External Cloud Services"]
+        GoogleGemini["Google Gemini v1beta REST API"]
+        Firestore["Cloud Firestore REST API"]
+        FirebaseAuth["Firebase Authentication"]
+    end
+
+    UI --> BLoC
+    BLoC --> AS
+    AS -- "1. Force-refresh & obtain ID Token" --> FirebaseAuth
+    AS -- "2. POST /api/chat with Bearer Token" --> AuthMid
+    AS -- "Failure fallback" --> OfflineEngine
+    AuthMid -- "3. Verify RS256 Signature" --> Edge
+    AuthMid --> RateLimit
+    RateLimit --> AgentLoop
+    AgentLoop -- "4. GenerateContent + Tools" --> GoogleGemini
+    GoogleGemini -- "5. Function Call (get_summary, etc.)" --> AgentLoop
+    AgentLoop -- "6. Execute Tier 1 / 2 Tools" --> ToolRegistry
+    ToolRegistry -- "7. Fetch Transactions / Write Pending" --> Firestore
+    AgentLoop -- "8. functionResponse (role: user, id)" --> GoogleGemini
+    GoogleGemini -- "9. Synthesized Natural Language Advice" --> AgentLoop
+    AgentLoop -- "10. JSON Response {reply, toolCalls, pendingAction}" --> AS
+    AS --> BLoC
+    BLoC --> UI
+    UI -- "11. Human Confirmation: POST /api/confirm" --> ConfirmEngine
+    ConfirmEngine -- "12. Atomic Commit (updateTime check)" --> Firestore
 ```
 
 ---
 
-## 3. Approved Tools Specification
+## 2. End-to-End Request Flow
 
-### `get_summary(month)`
-- **Input:** `month` (optional string, format `YYYY-MM`). Defaults to current month.
-- **Deterministic Logic:**
-  - Queries `users/{docId}/income_expenses` where `date >= startOfMonth` and `date < endOfMonth`.
-  - Calculates:
-    $$\text{Net Savings} = \text{Total Income} - \text{Total Expenses}$$
-    $$\text{Savings Rate} = \begin{cases} \left(\frac{\text{Net Savings}}{\text{Total Income}}\right) \times 100 & \text{if Total Income} > 0 \\ 0 & \text{otherwise} \end{cases}$$
-  - Category breakdown:
-    $$\text{Category \%} = \begin{cases} \left(\frac{\text{Category Expense}}{\text{Total Expenses}}\right) \times 100 & \text{if Total Expenses} > 0 \\ 0 & \text{otherwise} \end{cases}$$
+### A. Chat Endpoint (`POST /api/chat`)
+1. **Token Acquisition:** Flutter's `AgentService` retrieves the user's current Firebase ID Token via `FirebaseAuth.instance.currentUser?.getIdToken()`.
+2. **CORS & Method Validation:** `handleCors(req, res)` processes `OPTIONS` preflight requests (returning HTTP 204). Non-POST methods are rejected with HTTP 405.
+3. **Authentication Verification (`lib/auth.js`):**
+   - Extracts the `Bearer <token>` string from the `Authorization` header.
+   - Dynamically imports `jose` and verifies the RS256 token against Google's public JWKS endpoint:
+     `https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com`.
+   - Validates that `issuer === 'https://securetoken.google.com/<projectId>'` and `audience === projectId`.
+   - Extracts `uid` and `email` to construct the canonical document path: `${email.toLowerCase()}_${uid}`.
+4. **Rate Limit Gate (`lib/ratelimit.js`):**
+   - Enforces a sliding window per `uid`: maximum **20 requests per minute** and **200 requests per day**.
+   - If exceeded, returns HTTP 429 with a `Retry-After: 60` header.
+5. **Request Sanitization & Multi-Turn Normalization (`lib/gemini.js`):**
+   - Validates message length ($\le 1000$ characters).
+   - Sanitizes and masks PII (emails, phone numbers, credit card numbers) using `maskPii()`.
+   - Normalizes conversation turns ensuring the first turn is `role: "user"` and turns strictly alternate (`user -> model -> user -> model`).
+6. **Gemini Agent Execution Loop:**
+   - Calls Google Gemini REST API (`https://generativelanguage.googleapis.com/v1beta/models/<model>:generateContent`) using the `x-goog-api-key` header (never in the URL query string).
+   - If Gemini returns one or more `functionCall` items:
+     - Tier 1 tools execute deterministically via `executeTier1Tool()` and query Firestore REST.
+     - Tier 2 proposal tools create a `PENDING` action document in `users/{docId}/pending_actions/{actionId}` with a 15-minute expiration.
+     - The exact model candidate content turn is preserved (retaining `thoughtSignature` and `id` fields).
+     - A user turn containing `functionResponse` for each called tool is appended and sent back to Gemini.
+   - Gemini synthesizes the final advice, appending the mandatory disclaimer:
+     > *"This is a suggestion, not professional financial advice."*
+7. **Client Delivery:** Returns `{ reply, toolCalls, pendingAction, isOffline, offlineReason }` to the client.
 
-### `find_unusual_spending()`
-- **Deterministic Anomaly Detection Algorithm:**
-  - Aggregates the last 50 expense transactions by category.
-  - Computes the historical arithmetic mean for each category:
-    $$\mu_{\text{category}} = \frac{1}{N}\sum_{i=1}^{N} \text{Amount}_i$$
-  - Flags any transaction where $\text{Amount} \ge 1.5 \times \mu_{\text{category}}$ and $\text{Amount} > 20.0$.
-
-### `create_budget(category, limit)` & `create_savings_goal(name, target, months)`
-- **2-Step Confirmation Guarantee:** Enforces that no database writes occur until a user explicitly confirms the proposed action.
-- Uses idempotent document IDs (`category.toLowerCase().replaceAll(' ', '_')`) to prevent duplicate records.
-
----
-
-## 4. Security Design & Guarantees
-
-1. **Authentication:** All actions require a non-null `request.auth.uid`.
-2. **Authorization:** Every document path begins with `users/{docId}` where `docId == "${email}_${uid}"`. Cross-user access is blocked.
-3. **Anti-Replay Protection:** Re-executing a confirmed action is blocked by checking `status == 'PENDING'`. Once marked `CONFIRMED`, `REJECTED`, or `EXPIRED`, duplicate execution is rejected.
-4. **Expiry Enforcement:** Pending actions are valid for 15 minutes. Expired actions are rejected.
-5. **Audit Trail Integrity:** Actions append records with timestamp, status, actionId, and parameter snapshots.
-   - *Client SDK / Rules Tier:* `firestore.rules` enforces `allow update, delete: if false;`, ensuring existing logs cannot be edited or deleted by clients.
-   - *Backend Cloud Functions Tier:* Staged in `functions/index.js`, where write access is restricted exclusively to trusted server code with `verifiedByServer: true`, preventing client fabrication.
-
----
-
-## 5. Testing & Verification Classification
-
-To maintain scientific rigor and transparency, tests in ExpensePulse are categorized as follows:
-
-| Test Category | Execution Mechanism | Scope & Coverage |
-| :--- | :--- | :--- |
-| **Automated Unit & State Tests** | `flutter test` (22 Passing Tests) | Verifies model serialization, removal of plaintext passwords, financial math (totals, savings rate, 50/30/20 rule), boundary checks, prompt injection containment, confirmation lifecycle, and Firestore rule invariants. |
-| **Firestore Security Rules Tests** | `test/firestore_rules_simulation_test.dart` | Tests rule invariants: owner validation, cross-user denial, password injection prevention, positive amount enforcement, and append-only audit logs. |
-| **Local Emulator Suite** | `firebase.json` (Ports 8080, 9099, 5001, 4000) | Pre-configured emulator suite allowing local Firestore, Auth, and Functions execution without connecting to production. |
-| **Offline Deterministic Fallback** | `AiRemoteDataSource` rule engine | Provides instant, zero-latency financial analysis and tool proposal when no Gemini API key is configured or when offline. |
-| **Live AI Integration** | Google AI Studio (`gemini-2.5-flash`) | Supports runtime API key configuration for live natural language conversation and function calling. |
+### B. Confirmation Endpoint (`POST /api/confirm`)
+1. User reviews the interactive proposal card in Flutter and taps **"Confirm & Save"**.
+2. Client sends `POST /api/confirm` with `{ actionId }` and the Bearer token.
+3. Server authenticates token and fetches `users/{docId}/pending_actions/{actionId}` from Firestore REST.
+4. State Machine enforces:
+   - **Ownership:** `action.uid === auth.uid` (returns HTTP 403 on mismatch).
+   - **Anti-Replay:** `action.status === 'PENDING'` (returns HTTP 409 Conflict if already processed).
+   - **Expiration:** `Date.now() <= expiresAt` (returns HTTP 410 Expired if timed out).
+5. Executes an **Atomic Commit** via Firestore REST with `currentDocument.updateTime` precondition:
+   - Target document created (e.g., `users/{docId}/budgets/{slug}` or `savings_goals/{goalId}`).
+   - Pending action updated to `status: "CONFIRMED"`, `executedAt: <now>`, `auditLogId: <logId>`.
+   - Immutable audit log written to `users/{docId}/audit_logs/{logId}` with `writtenViaAgentApi: true`.
+6. Returns HTTP 200 with execution summary.
 
 ---
 
-## 6. Cloud Functions & Billing Requirements
+## 3. Cloud Firestore Data Model
 
-- **Free Spark Plan (Current Working Setup):** The application runs out of the box on Firebase Spark (free tier). The client Flutter app communicates directly with Firestore and Auth under strict security rules, utilizing the local offline engine or direct Gemini API.
-- **Blaze Plan (Pay-as-you-go) Requirement:** Deploying Firebase Cloud Functions (`functions/index.js`) to production requires upgrading the Firebase project to the **Blaze plan**.
-- **Secret Manager:** Once upgraded, the Gemini API key is securely stored in Google Cloud Secret Manager (`GEMINI_API_KEY`) and accessed only by Cloud Functions backend code. No client-side key storage is required in this tier.
+All user data is strictly scoped under the authenticated user's document identifier (`users/{email}_{uid}`):
 
+```
+users/
+└── {email}_{uid}/
+    ├── profile: { name, email, currency: "BDT", createdAt }
+    ├── income_expenses/
+    │   └── {transactionId}/
+    │       ├── id: string
+    │       ├── amount: number (positive double)
+    │       ├── isIncome: boolean
+    │       ├── category_name: string (e.g. "Dining & Food")
+    │       ├── category_id: string
+    │       ├── date: string (YYYY-MM-DD)
+    │       ├── time: string (HH:mm)
+    │       ├── description: string (wrapped in <data>...</data>)
+    │       └── createdAt: timestamp
+    ├── budgets/
+    │   └── {category_slug}/  (e.g. "dining_&_food")
+    │       ├── category: string
+    │       ├── limit: number (monthly cap in BDT)
+    │       ├── createdAt: timestamp
+    │       └── updatedAt: timestamp
+    ├── savings_goals/
+    │   └── {goalId}/
+    │       ├── id: string (UUIDv4)
+    │       ├── goalName: string
+    │       ├── targetAmount: number
+    │       ├── targetMonths: number
+    │       ├── monthlyContribution: number (targetAmount / targetMonths)
+    │       ├── currentSaved: number (default 0.0)
+    │       └── createdAt: timestamp
+    ├── pending_actions/
+    │   └── {actionId}/
+    │       ├── id: string (UUIDv4)
+    │       ├── uid: string
+    │       ├── docId: string
+    │       ├── actionType: "CREATE_BUDGET" | "CREATE_SAVINGS_GOAL"
+    │       ├── title: string
+    │       ├── parameters: map
+    │       ├── status: "PENDING" | "CONFIRMED" | "REJECTED" | "EXPIRED"
+    │       ├── createdAt: timestamp
+    │       ├── expiresAt: timestamp (createdAt + 15 min)
+    │       ├── executedAt?: timestamp
+    │       └── auditLogId?: string
+    └── audit_logs/
+        └── {logId}/
+            ├── id: string (UUIDv4)
+            ├── uid: string
+            ├── docId: string
+            ├── actionId: string | null
+            ├── actionType: string
+            ├── status: "SUCCESS" | "CANCELLED" | "FAILED"
+            ├── summary: string
+            ├── details: map
+            ├── timestamp: timestamp
+            └── writtenViaAgentApi: boolean
+```
+
+---
+
+## 4. Approved Agent Tools & Mathematical Specifications
+
+All financial computations are performed deterministically in JavaScript/Dart. The LLM is strictly prohibited from inventing or approximating numbers.
+
+### Tier 1: Read-Only Analysis Tools (Auto-Executed)
+
+#### 1. `get_summary(month?)`
+- **Purpose:** Computes comprehensive monthly financial metrics.
+- **Formulas:**
+  $$\text{Net Savings} = \text{Total Income} - \text{Total Expense}$$
+  $$\text{Savings Rate} = \begin{cases} \left(\frac{\text{Net Savings}}{\text{Total Income}}\right) \times 100 & \text{if Total Income} > 0 \\ 0.0 & \text{otherwise} \end{cases}$$
+  $$\text{Category Breakdown}[c] = \sum_{t \in \text{Expenses}_c} t.\text{amount}$$
+
+#### 2. `get_transactions(month?, category?, limit?)`
+- **Purpose:** Retrieves transaction history with safe pagination (capped at 50) and wraps descriptions in `<data>...</data>` tags to prevent indirect prompt injection.
+
+#### 3. `find_unusual_spending(month?)`
+- **Purpose:** Detects anomalous spending spikes compared to historical category averages.
+- **Algorithm:**
+  - Evaluates categories with at least 3 historical expense samples.
+  - Computes arithmetic mean: $\bar{x} = \frac{1}{N}\sum_{i=1}^{N} x_i$.
+  - Anomaly criteria: $\text{Amount} \ge 1.5 \times \bar{x}$ AND $\text{Amount} \ge 500\text{ BDT}$.
+  - Computes spike ratio: $R = \frac{\text{Amount}}{\bar{x}}$, sorted descending.
+
+#### 4. `detect_recurring_bills(minMonths?)`
+- **Purpose:** Automatically identifies recurring subscriptions and utility obligations.
+- **Algorithm:**
+  - Normalizes transaction descriptions (lowercased, stripped of digits and punctuation).
+  - Requires occurrences across $\ge 2$ distinct calendar months.
+  - Computes typical day of month: $\text{Day} = \text{round}\left(\frac{1}{N}\sum d_i\right)$.
+  - Calculates trend percentage: $\text{Trend} = \frac{A_{\text{latest}} - A_{\text{prev}}}{A_{\text{prev}}} \times 100$.
+  - Projects next expected billing date.
+
+#### 5. `analyze_bill(title)`
+- **Purpose:** Month-by-month trajectory analysis of a specific vendor or utility.
+- **Algorithm:** Filters expenses matching query title and computes month-over-month delta percentages.
+
+#### 6. `forecast_next_month(category?)`
+- **Purpose:** Expense projection based on a 3-month moving average.
+- **Formula:**
+  $$\hat{E}_{c} = \frac{1}{M}\sum_{m=1}^{M} E_{c, m} \quad (M \le 3)$$
+
+#### 7. `propose_budget(targetSavingsRate?)`
+- **Purpose:** Generates recommended category budget caps utilizing the classical 50/30/20 financial rule.
+- **Allocations:**
+  - Needs Cap: $50\%$ of average monthly income (Housing, Groceries, Utilities, Health, Transport).
+  - Wants Cap: $30\%$ of average monthly income (Dining, Shopping, Entertainment).
+  - Target Savings: $20\%$ of average monthly income.
+
+#### 8. `get_budget_status(month?)`
+- **Purpose:** Evaluates current-month spending against established budget caps.
+- **Alert Logic:**
+  - Near Limit Alert: $80\% \le \frac{\text{Spent}}{\text{Limit}} < 100\%$.
+  - Over Budget Alert: $\frac{\text{Spent}}{\text{Limit}} \ge 100\%$.
+
+---
+
+### Tier 2: Proposal Tools (Requires 2-Step Human Confirmation)
+
+#### 9. `create_budget(category, limit)`
+- **Constraints:** `category` must be non-empty string; `limit` must be a positive number $> 0$.
+- **Behavior:** Never writes to `budgets/`. Creates a `PENDING` action record and returns a proposal card to the user.
+
+#### 10. `create_savings_goal(goalName, targetAmount, targetMonths)`
+- **Constraints:** `targetAmount > 0`, `1 <= targetMonths <= 120`.
+- **Formulas:**
+  $$\text{Monthly Contribution} = \text{round}\left(\frac{\text{Target Amount}}{\text{Target Months}}, 2\right)$$
+- **Behavior:** Creates a `PENDING` action record for user authorization.
+
+---
+
+## 5. 2-Step Confirmation State Machine
+
+```mermaid
+stateDiagram-v2
+    [*] --> PENDING: Agent executes Tier 2 Tool (create_budget / create_savings_goal)
+    PENDING --> CONFIRMED: User taps "Confirm & Save" (/api/confirm) [Precondition: updateTime matches]
+    PENDING --> REJECTED: User taps "Cancel" (/api/cancel)
+    PENDING --> EXPIRED: System checks now > expiresAt (15-min window)
+    CONFIRMED --> [*]: Writes target document + Appends immutable audit_log
+    REJECTED --> [*]: Appends audit_log with status: CANCELLED
+    EXPIRED --> [*]: Blocks execution, returns HTTP 410
+```
+
+- **Precondition Concurrency Defense:** All confirmation commits pass Firestore's `currentDocument: { updateTime: pendingDoc.updateTime }`. If a concurrent request or replay attempt occurs, Firestore rejects the commit with an HTTP 409 precondition failure.
+
+---
+
+## 6. Error Handling & Deterministic Offline Fallback
+
+ExpensePulse guarantees high availability through a multi-tiered fallback architecture:
+
+1. **Transient Network or Rate Limit Failures:**
+   - On HTTP 404 (model unavailable), the agent retries once with the configured fallback model (`gemini-3.5-flash`).
+   - On HTTP 429 or 503, the agent retries once with the fallback model.
+2. **Offline Rule Engine Fallback:**
+   - If the device is disconnected, or the Gemini API is unreachable, the client and server activate an internal **deterministic offline rule engine**.
+   - The engine parses intent via rule-matching keywords and directly executes the appropriate Tier 1 analytical calculation against local data.
+   - The response includes `"isOffline": true` and an explicit `offlineReason` (`"missing_key"`, `"http_400"`, `"http_429"`, `"timeout"`, etc.), preserving full transparency for the user.

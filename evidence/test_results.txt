@@ -1,0 +1,173 @@
+================================================================================
+EXPENSEPULSE / PULSE AI AGENT — VERIFICATION & TEST RESULTS
+FINTECHATHON 2026 SUBMISSION (TOPIC A: PERSONAL FINANCE ASSISTANT)
+Timestamp: 2026-10-20 18:06:13 +07:00
+================================================================================
+
+SUMMARY:
+- Flutter Static Analysis: 0 Errors (Flutter 3.x / Dart 3.x)
+- Flutter Unit & Widget Tests: 37 Passed / 0 Failed (100% Pass Rate)
+- Agent API Serverless Backend Tests: 43 Passed / 0 Failed (100% Pass Rate, 7 Suites)
+- Total Automated Invariant Checks: 80 Passed / 0 Failed
+
+================================================================================
+PART 1: FLUTTER STATIC ANALYSIS (flutter analyze)
+================================================================================
+Analyzing expense_pulse-main...                                 
+
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\app\app_theme.dart:47:30 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\app\app_theme.dart:51:49 - deprecated_member_use
+   info - The imported package 'meta' isn't a dependency of the importing package - lib\features\add_income_expense\presentation\bloc\add_income_expense_bloc.dart:2:8 - depend_on_referenced_packages
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\features\add_income_expense\presentation\pages\add_income_expense_page.dart:155:41 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\features\add_income_expense\presentation\pages\add_income_expense_page.dart:222:46 - deprecated_member_use
+   info - The imported package 'meta' isn't a dependency of the importing package - lib\features\auth\presentation\bloc\auth_bloc.dart:2:8 - depend_on_referenced_packages
+   info - The imported package 'meta' isn't a dependency of the importing package - lib\features\category\presentation\bloc\category_bloc.dart:2:8 - depend_on_referenced_packages
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\features\category\presentation\pages\catagory_list_page.dart:187:50 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\features\category\presentation\pages\catagory_list_page.dart:320:60 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\features\category\presentation\pages\catagory_list_page.dart:388:54 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\features\category\presentation\pages\catagory_list_page.dart:396:58 - deprecated_member_use
+   info - The imported package 'meta' isn't a dependency of the importing package - lib\features\dashboard\presentation\bloc\dashboard_bloc.dart:2:8 - depend_on_referenced_packages
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\features\dashboard\presentation\pages\dashboard_page.dart:196:44 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\features\dashboard\presentation\pages\dashboard_page.dart:218:54 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\features\dashboard\presentation\pages\dashboard_page.dart:341:56 - deprecated_member_use
+warning - The value of the local variable 'category' isn't used - lib\features\dashboard\presentation\pages\dashboard_page.dart:386:57 - unused_local_variable
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\features\dashboard\presentation\pages\dashboard_page.dart:499:47 - deprecated_member_use
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\features\dashboard\presentation\pages\dashboard_page.dart:687:13 - use_build_context_synchronously
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\features\menu\presentation\pages\menu_page.dart:307:34 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\features\menu\presentation\pages\menu_page.dart:311:33 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\features\menu\presentation\pages\menu_page.dart:322:35 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\features\menu\presentation\pages\menu_page.dart:380:55 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\features\menu\presentation\pages\menu_page.dart:385:35 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\features\splash\presentation\pages\splash_page.dart:99:43 - deprecated_member_use
+   info - The imported package 'meta' isn't a dependency of the importing package - lib\features\transactions\presentation\bloc\transaction_bloc.dart:2:8 - depend_on_referenced_packages
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\features\transactions\presentation\widgets\transaction_card.dart:32:34 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\features\transactions\presentation\widgets\transaction_card.dart:34:53 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\features\transactions\presentation\widgets\transaction_card.dart:63:45 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\features\transactions\presentation\widgets\transaction_card.dart:64:41 - deprecated_member_use
+   info - Don't use 'BuildContext's across async gaps - lib\features\transactions\presentation\widgets\transaction_card.dart:131:27 - use_build_context_synchronously
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\features\transactions\presentation\widgets\transaction_card.dart:155:41 - deprecated_member_use
+
+
+
+================================================================================
+PART 2: FLUTTER SUITE EXECUTION (flutter test)
+================================================================================
+00:00 +0: loading E:/financial_advisor_ai/expense_pulse-main/test/agent_confirmation_flow_test.dart
+00:00 +0: E:/financial_advisor_ai/expense_pulse-main/test/agent_confirmation_flow_test.dart: Agent 2-Step Confirmation & Authorization Security Engine Creates PENDING action with expiration and parameter validation
+00:00 +1: E:/financial_advisor_ai/expense_pulse-main/test/agent_confirmation_flow_test.dart: Agent 2-Step Confirmation & Authorization Security Engine Prevents replay/duplicate execution if action is already CONFIRMED
+00:00 +2: E:/financial_advisor_ai/expense_pulse-main/test/agent_confirmation_flow_test.dart: Agent 2-Step Confirmation & Authorization Security Engine Rejects expired actions even if status is pending
+00:00 +3: E:/financial_advisor_ai/expense_pulse-main/test/agent_confirmation_flow_test.dart: Agent 2-Step Confirmation & Authorization Security Engine Cross-user authorization: User B cannot confirm User A action
+00:00 +4: E:/financial_advisor_ai/expense_pulse-main/test/agent_confirmation_flow_test.dart: Agent 2-Step Confirmation & Authorization Security Engine Savings Goal calculation: Deterministic monthly contribution
+00:00 +5: E:/financial_advisor_ai/expense_pulse-main/test/agent_confirmation_flow_test.dart: Agent 2-Step Confirmation & Authorization Security Engine Unusual spending anomaly detection algorithm validation
+00:02 +6: E:/financial_advisor_ai/expense_pulse-main/test/agent_service_test.dart: AgentService Error Mapping and HTTP Flow Tests Returns "Please log in again" when user is not authenticated
+[AgentService] No Firebase ID token available (user not logged in or null token).
+00:02 +7: E:/financial_advisor_ai/expense_pulse-main/test/agent_service_test.dart: AgentService Error Mapping and HTTP Flow Tests Retries with refreshed token on 401 and succeeds
+00:02 +8: E:/financial_advisor_ai/expense_pulse-main/test/agent_service_test.dart: AgentService Error Mapping and HTTP Flow Tests Maps 429 status code to "Too many requests, wait a minute"
+00:02 +9: E:/financial_advisor_ai/expense_pulse-main/test/agent_service_test.dart: AgentService Error Mapping and HTTP Flow Tests Maps 409 status code to "This action was already processed"
+00:02 +10: E:/financial_advisor_ai/expense_pulse-main/test/agent_service_test.dart: AgentService Error Mapping and HTTP Flow Tests Maps 410 status code to expired action message
+00:02 +11: E:/financial_advisor_ai/expense_pulse-main/test/agent_service_test.dart: AgentService Error Mapping and HTTP Flow Tests Maps TimeoutException to friendly timeout message
+[AgentService] Caught TimeoutException: Connection timed out
+00:02 +12: E:/financial_advisor_ai/expense_pulse-main/test/agent_service_test.dart: AgentService Error Mapping and HTTP Flow Tests Maps SocketException to network error message
+[AgentService] Caught SocketException: Failed host lookup (osError: null)
+00:02 +13: E:/financial_advisor_ai/expense_pulse-main/test/agent_service_test.dart: AgentService Error Mapping and HTTP Flow Tests Confirm sends actionId to /api/confirm and returns summary on success
+00:02 +14: E:/financial_advisor_ai/expense_pulse-main/test/agent_service_test.dart: AgentService Error Mapping and HTTP Flow Tests Cancel sends actionId to /api/cancel and returns success
+00:02 +15: E:/financial_advisor_ai/expense_pulse-main/test/financial_calculation_test.dart: Financial Calculations & Edge Cases Calculates total income, expenses, and net savings correctly
+00:02 +16: E:/financial_advisor_ai/expense_pulse-main/test/financial_calculation_test.dart: Financial Calculations & Edge Cases Prevents division by zero when total expense is 0 in category breakdown
+00:02 +17: E:/financial_advisor_ai/expense_pulse-main/test/financial_calculation_test.dart: Financial Calculations & Edge Cases Correctly computes 50/30/20 recommended allocation from monthly income
+00:02 +18: E:/financial_advisor_ai/expense_pulse-main/test/financial_calculation_test.dart: Financial Amount Sanitization & Parsing Rejects non-numeric, negative, and zero amounts
+00:02 +19: E:/financial_advisor_ai/expense_pulse-main/test/financial_calculation_test.dart: AddIncomeExpenseRequestModel Deserialization & Key Compatibility fromJson correctly parses snake_case keys (category_id, category_name)
+00:02 +20: E:/financial_advisor_ai/expense_pulse-main/test/financial_calculation_test.dart: AddIncomeExpenseRequestModel Deserialization & Key Compatibility fromJson falls back to camelCase keys (categoryId, categoryName)
+00:02 +21: E:/financial_advisor_ai/expense_pulse-main/test/financial_calculation_test.dart: AddIncomeExpenseRequestModel Deserialization & Key Compatibility toJson and fromJson round-trip preserves category fields
+00:02 +22: E:/financial_advisor_ai/expense_pulse-main/test/ai_assistant_bloc_test.dart: AiAssistantBloc Confirm & Cancel Flow Tests ConfirmPendingActionEvent successfully confirms action, updates state, and appends confirmation message
+00:02 +23: E:/financial_advisor_ai/expense_pulse-main/test/ai_assistant_bloc_test.dart: AiAssistantBloc Confirm & Cancel Flow Tests ConfirmPendingActionEvent failure emits error message and keeps action PENDING
+00:02 +24: E:/financial_advisor_ai/expense_pulse-main/test/ai_assistant_bloc_test.dart: AiAssistantBloc Confirm & Cancel Flow Tests RejectPendingActionEvent cancels action and updates status to REJECTED
+00:02 +25: E:/financial_advisor_ai/expense_pulse-main/test/firestore_rules_simulation_test.dart: Firestore Security Rules Invariant Validation Rule 1: Authentication and Ownership Verification
+00:03 +26: E:/financial_advisor_ai/expense_pulse-main/test/firestore_rules_simulation_test.dart: Firestore Security Rules Invariant Validation Rule 2: Plaintext Password Field Injection is Strictly Rejected in Profile
+00:03 +27: E:/financial_advisor_ai/expense_pulse-main/test/firestore_rules_simulation_test.dart: Firestore Security Rules Invariant Validation Rule 3: Transaction Amount Must be a Positive Number
+00:03 +28: E:/financial_advisor_ai/expense_pulse-main/test/firestore_rules_simulation_test.dart: Firestore Security Rules Invariant Validation Rule 4: Budget and Savings Goal Positive Values Enforced
+00:03 +29: E:/financial_advisor_ai/expense_pulse-main/test/firestore_rules_simulation_test.dart: Firestore Security Rules Invariant Validation Rule 5: Pending Actions Access Control & Lifecycle Validation
+00:03 +30: E:/financial_advisor_ai/expense_pulse-main/test/firestore_rules_simulation_test.dart: Firestore Security Rules Invariant Validation Rule 6: Audit Logs Append-Only and Tamper-Resistant Enforcement
+00:03 +31: E:/financial_advisor_ai/expense_pulse-main/test/firestore_rules_simulation_test.dart: Firestore Security Rules Invariant Validation Rule 7: Tutorial Collection is Read-Only for Auth Users and Write-Denied for All
+00:03 +32: E:/financial_advisor_ai/expense_pulse-main/test/firestore_rules_simulation_test.dart: Firestore Security Rules Invariant Validation Rule 8: Default Deny on Unknown Collections
+00:03 +33: E:/financial_advisor_ai/expense_pulse-main/test/security_validation_test.dart: Security & Privacy Controls RegistrationModel serialization MUST NOT contain password field
+00:03 +34: E:/financial_advisor_ai/expense_pulse-main/test/security_validation_test.dart: Security & Privacy Controls Cross-User Data Isolation: Document ownership validation
+00:03 +35: E:/financial_advisor_ai/expense_pulse-main/test/security_validation_test.dart: Security & Privacy Controls Untrusted Prompt Injection Defense: Transaction description is treated as pure data
+00:04 +36: E:/financial_advisor_ai/expense_pulse-main/test/widget_test.dart: App branding and MeshBackground smoke test
+00:05 +37: All tests passed!
+
+
+================================================================================
+PART 3: AGENT-API SERVERLESS TEST SUITE (npm test in agent-api)
+================================================================================
+
+> pulse-expense-agent-api@1.0.0 test
+> node --test test/*.test.js
+
+Gû¦ Auth Middleware & Token Verification
+  G£ö buildUserDocId constructs exact legacy format: ${email}_${uid} (1.165ms)
+  G£ö buildUserDocId handles missing or empty email cleanly (0.1892ms)
+  G£ö valid RS256 token passes verification and extracts user identity (14.6194ms)
+  G£ö rejects expired token with generic 401 without internal leak (3.0822ms)
+  G£ö rejects token with wrong audience (2.4633ms)
+  G£ö rejects token with wrong issuer (2.1326ms)
+  G£ö rejects token missing email claim (2.0353ms)
+  G£ö docId is always derived strictly from token claims and ignores request body (2.1014ms)
+  G£ö rejects request missing Authorization header with 401 (0.5346ms)
+  G£ö rejects request with malformed Bearer scheme with 401 (0.2679ms)
+  G£ö rejects empty Bearer token with 401 (0.197ms)
+G£ö Auth Middleware & Token Verification (182.3151ms)
+Gû¦ 2-Step Confirmation State Machine & Security Controls
+  G£ö Confirm success path: calls commit with budget write, status=CONFIRMED + updateTime precondition, audit log with writtenViaAgentApi: true (76.772ms)
+  G£ö Replay path: status != PENDING returns 409 conflict, commit is not called (3.46ms)
+  G£ö Expired path: now > expiresAt marks EXPIRED, returns 410 (2.8233ms)
+  G£ö Cross-user path: action.uid != auth.uid returns 403 (2.6656ms)
+G£ö 2-Step Confirmation State Machine & Security Controls (251.6926ms)
+Gû¦ Firestore REST Client & Converters
+  G£ö converts primitive types to and from Firestore REST representations (5.2494ms)
+  G£ö getDoc sends Authorization header and encodes '@' in document path (1.5361ms)
+  G£ö listCollection paginates and follows nextPageToken (0.9793ms)
+  G£ö commit sends atomic writes with preconditions (3.5943ms)
+G£ö Firestore REST Client & Converters (13.4785ms)
+[Gemini Model 404] Model gemini-3.5-flash-lite returned 404. Retrying with fallback model gemini-3.5-flash...
+[Gemini Model 404] Model gemini-3.5-flash-lite returned 404. Retrying with fallback model gemini-3.5-flash...
+Gû¦ Gemini Agent API, Diagnostics & Tool Schema Tests
+  G£ö 1. Missing or placeholder GEMINI_API_KEY returns offlineReason: 'missing_key' and logs 'GEMINI_API_KEY missing' (6.86ms)
+  G£ö 2. mapStatusToOfflineReason maps all required HTTP status codes accurately (2.339ms)
+  G£ö 3. Sends API key in 'x-goog-api-key' header and never in URL query string (3.4802ms)
+  G£ö 4. Tool declarations use 'functionDeclarations', valid types, and no forbidden fields (1.2491ms)
+  G£ö 5. When Gemini fails with HTTP 400/401/403/500, logs safe diagnostic without leaking key or URL (1.4854ms)
+  G£ö 6. Network timeout returns offlineReason: 'timeout' (0.9092ms)
+  G£ö 7. getModelName uses GEMINI_MODEL exactly, trimming whitespace and stripping leading 'models/', defaulting to gemini-3.5-flash-lite (0.3328ms)
+  G£ö 8. On 404, agent retries configured fallback model (gemini-3.5-flash) once and succeeds (1.805ms)
+  G£ö 9. On 404 when fallback model also fails, returns offline fallback with offlineReason 'http_404' (1.2134ms)
+  G£ö 10. Multi-turn tool execution sends functionResponse with role: 'user' (not 'function') (3.9636ms)
+G£ö Gemini Agent API, Diagnostics & Tool Schema Tests (26.8665ms)
+Gû¦ In-Memory Rate Limiter
+  G£ö allows up to 20 requests per minute and blocks the 21st (2.6724ms)
+  G£ö allows up to 200 requests per day and blocks the 201st (0.4146ms)
+  G£ö isolates rate limits between different users (0.3633ms)
+  G£ö allows requests when uid is missing (bypass) (1.8609ms)
+G£ö In-Memory Rate Limiter (7.2054ms)
+Gû¦ Security, Privacy & Guard Rails
+  G£ö wrapUntrustedData neutralizes prompt injection and encloses text in <data> tags (2.6128ms)
+  G£ö sanitizeString strips ASCII control characters and truncates length to 200 (0.2966ms)
+  G£ö maskPii masks emails, phone numbers, and bank/card numbers (1.2414ms)
+  G£ö validateToolCall rejects unknown or unapproved tools (0.5674ms)
+  G£ö validateToolCall strictly checks parameter ranges for create_budget and create_savings_goal (1.8822ms)
+G£ö Security, Privacy & Guard Rails (8.8002ms)
+Gû¦ Deterministic Tool Engines Math & Logic
+  G£ö computeSummary accurately calculates totals, net savings, and savings rate (2.0325ms)
+  G£ö computeSummary handles zero income without NaN or division by zero (0.4258ms)
+  G£ö computeUnusualSpending flags transactions >= 1.5x mean with >= 3 samples (0.8977ms)
+  G£ö computeRecurringBills groups recurring charges across 2+ distinct months (15.9461ms)
+  G£ö computeBudgetProposal correctly computes 50/30/20 budget allocations (0.4443ms)
+G£ö Deterministic Tool Engines Math & Logic (22.1556ms)
+Gä¦ tests 43
+Gä¦ suites 7
+Gä¦ pass 43
+Gä¦ fail 0
+Gä¦ cancelled 0
+Gä¦ skipped 0
+Gä¦ todo 0
+Gä¦ duration_ms 438.9893
+

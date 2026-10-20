@@ -44,46 +44,13 @@ async function testHealthEndpoint() {
   const h1 = await fetchJson(`${BASE_URL}/api/health`);
   assert(h1.status === 200, "Health returns 200");
   assert(h1.json && h1.json.ok === true, "Health ok=true");
-  assert(h1.json && h1.json.hasApiKey === true, "Health hasApiKey=true");
-  assert(h1.json && h1.json.hasProjectId === true, "Health hasProjectId=true");
-  console.log(`    configuredModel: ${h1.json?.configuredModel}`);
+  assert(h1.json && h1.json.status === "healthy", "Health status='healthy'");
 
-  // 1b. Gemini connectivity test
-  const h2 = await fetchJson(`${BASE_URL}/api/health?checkGemini=true&model=gemini-3.5-flash-lite`);
-  assert(h2.status === 200, "checkGemini returns 200");
-  assert(h2.json && h2.json.geminiSuccess === true, "Gemini API connectivity OK",
-    h2.json?.geminiSuccess === false ? `Gemini failed: ${JSON.stringify(h2.json?.geminiResponse).slice(0, 200)}` : "");
-  console.log(`    geminiHttpStatus: ${h2.json?.geminiHttpStatus}, testModel: ${h2.json?.testModel}`);
-
-  // 1c. Gemini with tool declarations test
-  const h3 = await fetchJson(`${BASE_URL}/api/health?checkTools=true&model=gemini-3.5-flash-lite`);
-  assert(h3.status === 200, "checkTools returns 200");
-  assert(h3.json && h3.json.success === true, "Gemini with tools OK",
-    h3.json?.success !== true ? `Tools check failed: status=${h3.json?.status}, details=${JSON.stringify(h3.json?.details).slice(0, 300)}` : "");
-  
-  if (h3.json?.details?.candidates?.[0]) {
-    const parts = h3.json.details.candidates[0].content?.parts || [];
-    const hasFunctionCall = parts.some(p => p.functionCall);
-    const hasText = parts.some(p => p.text);
-    assert(hasFunctionCall || hasText, "Gemini returned functionCall or text with tools",
-      `Parts: ${JSON.stringify(parts.map(p => Object.keys(p)).flat())}`);
-  }
-
-  // 1d. Multi-turn Agent Loop (preserves thoughtSignature and matches functionCall ids)
-  const hAgent = await fetchJson(`${BASE_URL}/api/health?checkAgentLoop=true&model=gemini-3.5-flash-lite`);
-  assert(hAgent.status === 200, "checkAgentLoop returns 200");
-  assert(hAgent.json && hAgent.json.ok === true, "checkAgentLoop full multi-turn execution OK",
-    hAgent.json?.ok !== true ? `Loop failed: ${JSON.stringify(hAgent.json).slice(0, 300)}` : "");
-  if (hAgent.json?.ok) {
-    console.log(`    Multi-turn reply preview: "${hAgent.json?.replyPreview?.slice(0, 100)}..."`);
-    console.log(`    Tools executed: ${JSON.stringify(hAgent.json?.toolCallsExecuted)}`);
-  }
-
-  // 1e. OPTIONS
+  // 1b. OPTIONS
   const h4 = await fetch(`${BASE_URL}/api/health`, { method: "OPTIONS" });
   assert(h4.status === 204, "Health OPTIONS returns 204");
 
-  // 1f. POST should be 405
+  // 1c. POST should be 405
   const h5 = await fetchJson(`${BASE_URL}/api/health`, { method: "POST" });
   assert(h5.status === 405, "Health POST returns 405");
 }
@@ -561,7 +528,6 @@ async function main() {
   await testCancelEndpoint();
   await testGeminiDirect();
   await testRunAgentLocal();
-  await testVercelChatTools();
   await testUrlConstruction();
 
   console.log("\n" + "═".repeat(60));

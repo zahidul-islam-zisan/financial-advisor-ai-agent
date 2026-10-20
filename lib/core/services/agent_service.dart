@@ -58,10 +58,6 @@ class AgentService {
     final url = Uri.parse('$cleanBaseUrl$cleanEndpoint');
     final jsonPayload = jsonEncode(body);
 
-    if (kDebugMode) {
-      debugPrint('[AgentService] Request URL: $url');
-    }
-
     http.Response response;
     try {
       response = await _client
@@ -75,24 +71,10 @@ class AgentService {
           )
           .timeout(const Duration(seconds: 45));
 
-      if (kDebugMode) {
-        final preview = response.body.length > 300
-            ? response.body.substring(0, 300)
-            : response.body;
-        debugPrint('[AgentService] HTTP Status Code: ${response.statusCode}');
-        debugPrint('[AgentService] Response Body (first 300 chars): $preview');
-      }
-
       // Force refresh token once on 401 and retry
       if (response.statusCode == 401) {
-        if (kDebugMode) {
-          debugPrint('[AgentService] 401 Unauthorized received. Attempting token force-refresh & retry...');
-        }
         final refreshedToken = await _getIdToken(forceRefresh: true);
         if (refreshedToken == null) {
-          if (kDebugMode) {
-            debugPrint('[AgentService] Token refresh returned null.');
-          }
           return Left(Failure("Please log in again"));
         }
 
@@ -106,14 +88,6 @@ class AgentService {
               body: jsonPayload,
             )
             .timeout(const Duration(seconds: 45));
-
-        if (kDebugMode) {
-          final preview = response.body.length > 300
-              ? response.body.substring(0, 300)
-              : response.body;
-          debugPrint('[AgentService] Retry HTTP Status Code: ${response.statusCode}');
-          debugPrint('[AgentService] Retry Response Body (first 300 chars): $preview');
-        }
       }
     } on TimeoutException catch (e) {
       if (kDebugMode) {
